@@ -10,15 +10,19 @@ completed jobs. The monitoring API is a RESTful API that accepts HTTP requests a
 ## Overview
 
 The v2 version of the api uses jetty support. It is the same as the interface specification of v1 version
-, you can specify the port and context-path by modifying the configuration items in `seatunnel.yaml`
-
+, you can specify the port and context-path by modifying the configuration items in `seatunnel.yaml`,
+you can configure `enable-dynamic-port` to enable dynamic ports (the default port is accumulated starting from `port`), and the default is closed,
+If enable-dynamic-port is true, We will use the unused port in the range within the range of `port` and `port` + `port-range`, default range is 100
 
 ```yaml
 
 seatunnel:
   engine:
-    enable-http: true
-    port: 8080
+    http:
+      enable-http: true
+      port: 8080
+      enable-dynamic-port: true
+      port-range: 100
 ```
 
 Context-path can also be configured as follows:
@@ -27,9 +31,10 @@ Context-path can also be configured as follows:
 
 seatunnel:
   engine:
-    enable-http: true
-    port: 8080
-    context-path: /seatunnel
+    http:
+      enable-http: true
+      port: 8080
+      context-path: /seatunnel
 ```
 
 ## API reference
@@ -152,8 +157,22 @@ seatunnel:
     "pipelineEdges": {}
   },
   "metrics": {
-    "sourceReceivedCount": "",
-    "sinkWriteCount": ""
+    "SourceReceivedCount": "",
+    "SourceReceivedQPS": "",
+    "SourceReceivedBytes": "",
+    "SourceReceivedBytesPerSeconds": "",
+    "SinkWriteCount": "",
+    "SinkWriteQPS": "",
+    "SinkWriteBytes": "",
+    "SinkWriteBytesPerSeconds": "",
+    "TableSourceReceivedCount": {},
+    "TableSourceReceivedBytes": {},
+    "TableSourceReceivedBytesPerSeconds": {},
+    "TableSourceReceivedQPS": {},
+    "TableSinkWriteCount": {},
+    "TableSinkWriteQPS": {},
+    "TableSinkWriteBytes": {},
+    "TableSinkWriteBytesPerSeconds": {}
   },
   "finishedTime": "",
   "errorMsg": null,
@@ -379,15 +398,18 @@ When we can't get the job info, the response will be:
 
 #### Parameters
 
-> |         name         |   type   | data type |            description            |
+> | name                 |   type   | data type |            description            |
 > |----------------------|----------|-----------|-----------------------------------|
 > | jobId                | optional | string    | job id                            |
 > | jobName              | optional | string    | job name                          |
 > | isStartWithSavePoint | optional | string    | if job is started with save point |
+> | format               | optional | string    | config format, support json and hocon, default json |
 
 #### Body
 
-```json
+You can choose json or hocon to pass request body.
+The json format example:
+``` json
 {
     "env": {
         "job.mode": "batch"
@@ -395,7 +417,7 @@ When we can't get the job info, the response will be:
     "source": [
         {
             "plugin_name": "FakeSource",
-            "result_table_name": "fake",
+            "plugin_output": "fake",
             "row.num": 100,
             "schema": {
                 "fields": {
@@ -411,11 +433,42 @@ When we can't get the job info, the response will be:
     "sink": [
         {
             "plugin_name": "Console",
-            "source_table_name": ["fake"]
+            "plugin_input": ["fake"]
         }
     ]
 }
 ```
+The hocon format example:
+``` hocon
+env {
+  job.mode = "batch"
+}
+
+source {
+  FakeSource {
+    plugin_output = "fake"
+    row.num = 100
+    schema = {
+      fields {
+        name = "string"
+        age = "int"
+        card = "int"
+      }
+    }
+  }
+}
+
+transform {
+}
+
+sink {
+  Console {
+    plugin_input = "fake"
+  }
+}
+
+```
+
 
 #### Responses
 
@@ -458,7 +511,7 @@ When we can't get the job info, the response will be:
     "source": [
       {
         "plugin_name": "FakeSource",
-        "result_table_name": "fake",
+        "plugin_output": "fake",
         "row.num": 1000,
         "schema": {
           "fields": {
@@ -474,7 +527,7 @@ When we can't get the job info, the response will be:
     "sink": [
       {
         "plugin_name": "Console",
-        "source_table_name": ["fake"]
+        "plugin_input": ["fake"]
       }
     ]
   },
@@ -489,7 +542,7 @@ When we can't get the job info, the response will be:
     "source": [
       {
         "plugin_name": "FakeSource",
-        "result_table_name": "fake",
+        "plugin_output": "fake",
         "row.num": 1000,
         "schema": {
           "fields": {
@@ -505,7 +558,7 @@ When we can't get the job info, the response will be:
     "sink": [
       {
         "plugin_name": "Console",
-        "source_table_name": ["fake"]
+        "plugin_input": ["fake"]
       }
     ]
   }
@@ -614,7 +667,7 @@ For more information about customize encryption, please refer to the documentati
                     "age": "int"
                 }
             },
-            "result_table_name": "fake",
+            "plugin_output": "fake",
             "parallelism": 1,
             "hostname": "127.0.0.1",
             "username": "seatunnel",
@@ -654,7 +707,7 @@ For more information about customize encryption, please refer to the documentati
                     "age": "int"
                 }
             },
-            "result_table_name": "fake",
+            "plugin_output": "fake",
             "parallelism": 1,
             "hostname": "127.0.0.1",
             "username": "c2VhdHVubmVs",
@@ -740,3 +793,84 @@ If the parameter is an empty `Map` object, it means that the tags of the current
 ```
 </details>
 
+------------------------------------------------------------------------------------------
+
+### Get Logs from All Nodes
+
+<details>
+ <summary><code>GET</code> <code><b>/logs/:jobId</b></code> <code>(Returns a list of logs.)</code></summary>
+
+#### Request Parameters
+
+#### Parameters (to be added in the `params` field of the request body)
+
+> |    Parameter Name     |   Required   |  Type   |            Description            |
+> |-----------------------|--------------|---------|------------------------------------|
+> | jobId                 |   optional   | string  | job id                            |
+
+If `jobId` is empty, the request will return logs from all nodes. Otherwise, it will return the list of logs for the specified `jobId` from all nodes.
+
+#### Response
+
+Returns a list of logs from the requested nodes along with their content.
+
+#### Return List of All Log Files
+
+If you want to view the log list first, you can retrieve it via a `GET` request: `http://localhost:8080/logs?format=json`
+
+```json
+[
+  {
+    "node": "localhost:8080",
+    "logLink": "http://localhost:8080/logs/job-899485770241277953.log",
+    "logName": "job-899485770241277953.log"
+  },
+  {
+    "node": "localhost:8080",
+    "logLink": "http://localhost:8080/logs/job-899470314109468673.log",
+    "logName": "job-899470314109468673.log"
+  }
+]
+```
+
+Supported formats are `json` and `html`, with `html` as the default.
+
+#### Examples
+
+Retrieve logs for `jobId` `733584788375666689` across all nodes: `http://localhost:8080/logs/733584788375666689`
+Retrieve the list of logs from all nodes: `http://localhost:8080/logs`
+Retrieve the list of logs in JSON format: `http://localhost:8080/logs?format=json`
+Retrieve the content of a specific log file: `http://localhost:8080/logs/job-898380162133917698.log`
+
+</details>
+
+### Get Log Content from a Single Node
+
+<details>
+ <summary><code>GET</code> <code><b>/log</b></code> <code>(Returns a list of logs.)</code></summary>
+
+#### Response
+
+Returns a list of logs from the requested node.
+
+#### Examples
+
+To get a list of logs from the current node: `http://localhost:5801/log`
+To get the content of a log file: `http://localhost:5801/log/job-898380162133917698.log`
+
+</details>
+
+
+### Get Node Metrics
+
+<details>
+ <summary>
+    <code>GET</code> <code><b>/metrics</b></code>  
+    <code>GET</code> <code><b>/openmetrics</b></code>
+</summary>
+
+To get the metrics, you need to open `Telemetry` first, or you will get an empty response.  
+
+More information about `Telemetry` can be found in the [Telemetry](telemetry.md) documentation.
+
+</details>

@@ -26,10 +26,10 @@ import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.FileReaderOpt
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorErrorCode;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorException;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.shard.Shard;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.sink.client.ClickhouseProxy;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.sink.client.ShardRouter;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.state.CKFileCommitInfo;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.state.ClickhouseSinkState;
+import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseProxy;
 
 import org.apache.commons.io.FileUtils;
 
@@ -285,6 +285,8 @@ public class ClickhouseFileSinkWriter
                         + "\"");
         command.add("-N");
         command.add("\"" + "temp_table" + uuid + "\"");
+        command.add("-d _local");
+        command.add("-n");
         command.add("-q");
         command.add(
                 String.format(
@@ -382,9 +384,10 @@ public class ClickhouseFileSinkWriter
         String hostAddress = shard.getNode().getHost();
         String user = readerOption.getNodeUser().getOrDefault(hostAddress, "root");
         String password = readerOption.getNodePassword().getOrDefault(hostAddress, null);
+        String keyPath = readerOption.getKeyPath();
         FileTransfer fileTransfer =
                 FileTransferFactory.createFileTransfer(
-                        this.readerOption.getCopyMethod(), hostAddress, user, password);
+                        this.readerOption.getCopyMethod(), hostAddress, user, password, keyPath);
         fileTransfer.init();
         int randomPath = threadLocalRandom.nextInt(shardLocalDataPaths.get(shard).size());
         fileTransfer.transferAndChown(

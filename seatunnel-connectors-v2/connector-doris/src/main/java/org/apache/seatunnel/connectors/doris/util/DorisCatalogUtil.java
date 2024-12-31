@@ -24,8 +24,9 @@ import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.converter.BasicTypeDefine;
 import org.apache.seatunnel.api.table.converter.TypeConverter;
-import org.apache.seatunnel.connectors.doris.config.DorisOptions;
+import org.apache.seatunnel.connectors.doris.config.DorisSinkOptions;
 import org.apache.seatunnel.connectors.seatunnel.common.sql.template.SqlTemplate;
+import org.apache.seatunnel.connectors.seatunnel.common.util.CreateTableParser;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -39,7 +40,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkNotNull;
 
 @Slf4j
 public class DorisCatalogUtil {
@@ -155,7 +156,7 @@ public class DorisCatalogUtil {
                 SaveModePlaceHolder.ROWTYPE_PRIMARY_KEY.getPlaceHolder(),
                 primaryKey,
                 tablePath.getFullName(),
-                DorisOptions.SAVE_MODE_CREATE_TEMPLATE.key());
+                DorisSinkOptions.SAVE_MODE_CREATE_TEMPLATE.key());
         template =
                 template.replaceAll(
                         SaveModePlaceHolder.ROWTYPE_PRIMARY_KEY.getReplacePlaceHolder(),
@@ -165,7 +166,7 @@ public class DorisCatalogUtil {
                 SaveModePlaceHolder.ROWTYPE_UNIQUE_KEY.getPlaceHolder(),
                 uniqueKey,
                 tablePath.getFullName(),
-                DorisOptions.SAVE_MODE_CREATE_TEMPLATE.key());
+                DorisSinkOptions.SAVE_MODE_CREATE_TEMPLATE.key());
         template =
                 template.replaceAll(
                         SaveModePlaceHolder.ROWTYPE_UNIQUE_KEY.getReplacePlaceHolder(), uniqueKey);
@@ -174,7 +175,7 @@ public class DorisCatalogUtil {
                 SaveModePlaceHolder.ROWTYPE_DUPLICATE_KEY.getPlaceHolder(),
                 dupKey,
                 tablePath.getFullName(),
-                DorisOptions.SAVE_MODE_CREATE_TEMPLATE.key());
+                DorisSinkOptions.SAVE_MODE_CREATE_TEMPLATE.key());
         template =
                 template.replaceAll(
                         SaveModePlaceHolder.ROWTYPE_DUPLICATE_KEY.getReplacePlaceHolder(), dupKey);
