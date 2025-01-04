@@ -28,7 +28,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class FileSourceSplitEnumerator
@@ -40,7 +39,6 @@ public class FileSourceSplitEnumerator
     private final Set<FileSourceSplit> pendingSplit = new HashSet<>();
     private Set<FileSourceSplit> assignedSplit;
     private final List<String> filePaths;
-    private AtomicInteger assignCount = new AtomicInteger(0);
 
     public FileSourceSplitEnumerator(
             SourceSplitEnumerator.Context<FileSourceSplit> context, List<String> filePaths) {
@@ -97,10 +95,9 @@ public class FileSourceSplitEnumerator
         } else {
             // if parallelism > 1, according to hashCode of split's id to determine whether to
             // allocate the current task
-            assignCount.set(0);
             for (FileSourceSplit fileSourceSplit : pendingSplit) {
                 int splitOwner =
-                        getSplitOwner(assignCount.getAndIncrement(), context.currentParallelism());
+                        getSplitOwner(fileSourceSplit.splitId(), context.currentParallelism());
                 if (splitOwner == taskId) {
                     currentTaskSplits.add(fileSourceSplit);
                 }
@@ -110,7 +107,8 @@ public class FileSourceSplitEnumerator
         context.assignSplit(taskId, currentTaskSplits);
         // save the state of assigned splits
         assignedSplit.addAll(currentTaskSplits);
-
+        // remove the assigned splits from pending splits
+        currentTaskSplits.forEach(split -> pendingSplit.remove(split));
         LOGGER.info(
                 "SubTask {} is assigned to [{}]",
                 taskId,
@@ -120,8 +118,8 @@ public class FileSourceSplitEnumerator
         context.signalNoMoreSplits(taskId);
     }
 
-    private static int getSplitOwner(int assignCount, int numReaders) {
-        return assignCount % numReaders;
+    private static int getSplitOwner(String tp, int numReaders) {
+        return (tp.hashCode() & Integer.MAX_VALUE) % numReaders;
     }
 
     @Override
