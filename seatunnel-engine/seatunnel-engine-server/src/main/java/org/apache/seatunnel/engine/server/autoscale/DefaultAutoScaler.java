@@ -17,7 +17,6 @@
 
 package org.apache.seatunnel.engine.server.autoscale;
 
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -39,6 +38,9 @@ public final class DefaultAutoScaler {
     private long masterEpoch;
     private long generation;
     private volatile boolean closed;
+    private ScalingAction lastPublishedAction;
+    private StabilizationTracker.StabilizationState lastPublishedState;
+    private long lastPublishedTimeMillis = -1L;
 
     public DefaultAutoScaler(
             long masterEpoch,
@@ -83,35 +85,47 @@ public final class DefaultAutoScaler {
             return RecommendationFence.PublicationResult.REJECTED;
         }
         AutoscalerMetricsSnapshot snapshot = signalCollector.collect();
+        stateStore.updateCurrentSnapshot(snapshot);
         AutoscaleEvaluation evaluation = policy.evaluate(snapshot);
         StabilizationTracker.StabilizationState stabilizationState =
                 stabilizationTracker.evaluate(
                         evaluation.getAction(), timeSource.monotonicTimeMillis());
-        ScalingAction publishedAction = evaluation.getAction();
-        ArrayList<String> blockingReasons = new ArrayList<>(evaluation.getBlockingReasons());
-        if (stabilizationState == StabilizationTracker.StabilizationState.WAITING) {
-            blockingReasons.add("stabilization_window_not_satisfied");
-            publishedAction = ScalingAction.NO_ACTION;
-        }
-
         ScalingRecommendation recommendation =
                 ScalingRecommendation.builder()
                         .masterEpoch(masterEpoch)
                         .generation(generation++)
-                        .action(publishedAction)
+                        .action(evaluation.getAction())
+                        .stabilizationState(stabilizationState)
                         .currentWorkers(snapshot.getCurrentWorkers())
-                        .recommendedWorkers(recommendedWorkers(publishedAction, snapshot))
+                        .recommendedWorkers(recommendedWorkers(evaluation.getAction(), snapshot))
                         .observedAtMillis(timeSource.currentTimeMillis())
                         .validUntilMillis(
                                 timeSource.currentTimeMillis()
                                         + TimeUnit.SECONDS.toMillis(
                                                 config.getEvaluationIntervalSeconds()))
-                        .triggerReasons(evaluation.getTriggerReasons())
-                        .blockingReasons(blockingReasons)
+                        .decisionReasons(evaluation.getDecisionReasons())
                         .snapshot(snapshot)
                         .recommendationOnly(true)
                         .build();
-        return stateStore.publish(recommendation);
+        long currentTimeMillis = timeSource.monotonicTimeMillis();
+        // publish recommendation if state changed.
+        boolean stateChanged =
+                hasPublicationStateChanged(evaluation.getAction(), stabilizationState);
+        // publish recommendation if the "firing" status persists for longer than the specified
+        // configuration duration
+        boolean repeatIntervalElapsed =
+                isRepeatRecommendationDue(stabilizationState, currentTimeMillis);
+        boolean shouldPublish = stateChanged || repeatIntervalElapsed;
+        RecommendationFence.PublicationResult result =
+                shouldPublish
+                        ? stateStore.publish(recommendation)
+                        : RecommendationFence.PublicationResult.ACCEPTED;
+        if (shouldPublish && result == RecommendationFence.PublicationResult.ACCEPTED) {
+            lastPublishedAction = evaluation.getAction();
+            lastPublishedState = stabilizationState;
+            lastPublishedTimeMillis = currentTimeMillis;
+        }
+        return result;
     }
 
     public synchronized void close() {
@@ -121,6 +135,9 @@ public final class DefaultAutoScaler {
     public synchronized void reset(long masterEpoch) {
         this.masterEpoch = masterEpoch;
         this.generation = 0L;
+        this.lastPublishedAction = null;
+        this.lastPublishedState = null;
+        this.lastPublishedTimeMillis = -1L;
         this.stabilizationTracker.reset();
     }
 
@@ -132,13 +149,26 @@ public final class DefaultAutoScaler {
         return generation;
     }
 
-    private int recommendedWorkers(
-            ScalingAction publishedAction, AutoscalerMetricsSnapshot snapshot) {
+    private boolean hasPublicationStateChanged(
+            ScalingAction evaluatedAction,
+            StabilizationTracker.StabilizationState stabilizationState) {
+        return lastPublishedAction != evaluatedAction || lastPublishedState != stabilizationState;
+    }
+
+    private boolean isRepeatRecommendationDue(
+            StabilizationTracker.StabilizationState stabilizationState, long currentTimeMillis) {
+        return stabilizationState == StabilizationTracker.StabilizationState.FIRING
+                && lastPublishedState == StabilizationTracker.StabilizationState.FIRING
+                && currentTimeMillis - lastPublishedTimeMillis
+                        >= TimeUnit.SECONDS.toMillis(config.getRecommendationRepeatSeconds());
+    }
+
+    private int recommendedWorkers(ScalingAction action, AutoscalerMetricsSnapshot snapshot) {
         int currentWorkers = snapshot.getCurrentWorkers();
-        if (publishedAction == ScalingAction.SCALE_OUT) {
+        if (action == ScalingAction.SCALE_OUT) {
             return Math.min(config.getMaxWorkers(), currentWorkers + config.getScaleStep());
         }
-        if (publishedAction == ScalingAction.SCALE_IN_CANDIDATE) {
+        if (action == ScalingAction.SCALE_IN_CANDIDATE) {
             return Math.max(config.getMinWorkers(), currentWorkers - config.getScaleStep());
         }
         return currentWorkers;

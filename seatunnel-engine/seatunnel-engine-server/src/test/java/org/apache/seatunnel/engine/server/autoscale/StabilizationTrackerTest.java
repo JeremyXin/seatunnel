@@ -43,7 +43,7 @@ class StabilizationTrackerTest {
 
         tracker.evaluate(ScalingAction.SCALE_OUT, 10L);
         Assertions.assertEquals(
-                StabilizationTracker.StabilizationState.NOT_APPLICABLE,
+                StabilizationTracker.StabilizationState.NORMAL,
                 tracker.evaluate(ScalingAction.NO_ACTION, 10L + 200_000L));
         Assertions.assertEquals(
                 StabilizationTracker.StabilizationState.WAITING,
@@ -67,7 +67,7 @@ class StabilizationTrackerTest {
         StabilizationTracker tracker = new StabilizationTracker(300_000L, 600_000L);
 
         Assertions.assertEquals(
-                StabilizationTracker.StabilizationState.NOT_APPLICABLE,
+                StabilizationTracker.StabilizationState.NORMAL,
                 tracker.evaluate(ScalingAction.NO_ACTION, 10L));
         Assertions.assertEquals(
                 StabilizationTracker.StabilizationState.WAITING,

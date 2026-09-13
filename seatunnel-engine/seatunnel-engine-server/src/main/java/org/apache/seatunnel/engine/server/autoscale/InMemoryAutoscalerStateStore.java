@@ -39,6 +39,7 @@ public final class InMemoryAutoscalerStateStore implements AutoscalerStateStore 
     private final EnumMap<ScalingAction, Long> recommendationCounts =
             new EnumMap<>(ScalingAction.class);
     private ScalingRecommendation latest;
+    private AutoscalerMetricsSnapshot currentSnapshot;
 
     public InMemoryAutoscalerStateStore(int historySize) {
         if (historySize <= 0) {
@@ -53,11 +54,17 @@ public final class InMemoryAutoscalerStateStore implements AutoscalerStateStore 
     @Override
     public synchronized void clear() {
         latest = null;
+        currentSnapshot = null;
         history.clear();
         fence.reset();
         for (ScalingAction action : ScalingAction.values()) {
             recommendationCounts.put(action, 0L);
         }
+    }
+
+    @Override
+    public synchronized void updateCurrentSnapshot(AutoscalerMetricsSnapshot snapshot) {
+        currentSnapshot = Objects.requireNonNull(snapshot, "snapshot");
     }
 
     @Override
@@ -70,9 +77,12 @@ public final class InMemoryAutoscalerStateStore implements AutoscalerStateStore 
             return result;
         }
         latest = recommendation;
-        recommendationCounts.compute(
-                recommendation.getAction(), (action, count) -> count == null ? 1L : count + 1L);
         history.add(recommendation);
+        if (recommendation.getStabilizationState()
+                != StabilizationTracker.StabilizationState.WAITING) {
+            recommendationCounts.compute(
+                    recommendation.getAction(), (action, count) -> count == null ? 1L : count + 1L);
+        }
         while (history.size() > historySize) {
             history.removeFirst();
         }
@@ -90,7 +100,6 @@ public final class InMemoryAutoscalerStateStore implements AutoscalerStateStore 
         List<ScalingRecommendation> historyCopy =
                 Collections.unmodifiableList(new ArrayList<>(history));
         Map<ScalingAction, Long> countsCopy = new EnumMap<>(recommendationCounts);
-        AutoscalerMetricsSnapshot snapshot = latest == null ? null : latest.getSnapshot();
         return new AutoscalerView(
                 enabled,
                 running,
@@ -99,7 +108,7 @@ public final class InMemoryAutoscalerStateStore implements AutoscalerStateStore 
                 scaleOutStabilizationSeconds,
                 scaleInStabilizationSeconds,
                 latest,
-                snapshot,
+                currentSnapshot,
                 historyCopy,
                 countsCopy);
     }

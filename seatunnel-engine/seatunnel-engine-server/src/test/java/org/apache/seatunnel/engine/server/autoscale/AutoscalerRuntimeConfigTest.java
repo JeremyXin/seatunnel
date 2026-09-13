@@ -49,4 +49,11 @@ class AutoscalerRuntimeConfigTest {
                 IllegalArgumentException.class,
                 () -> AutoscalerRuntimeConfig.builder().scaleInStabilizationSeconds(-1).build());
     }
+
+    @Test
+    void rejectsNonPositiveRecommendationRepeatInterval() {
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> AutoscalerRuntimeConfig.builder().recommendationRepeatSeconds(0).build());
+    }
 }

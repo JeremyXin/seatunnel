@@ -28,7 +28,7 @@ public final class StabilizationTracker {
     private final long scaleInWindowMillis;
     private ScalingAction lastAction;
     private long actionFirstSeenAtMillis;
-    private StabilizationState state = StabilizationState.NOT_APPLICABLE;
+    private StabilizationState state = StabilizationState.NORMAL;
 
     public StabilizationTracker(long scaleOutWindowMillis, long scaleInWindowMillis) {
         this.scaleOutWindowMillis = scaleOutWindowMillis;
@@ -52,12 +52,11 @@ public final class StabilizationTracker {
             state = StabilizationState.WAITING;
             return state;
         }
-        if (state != StabilizationState.FIRING) {
-            // Keep firing once the same action has satisfied its stabilization window.
-            if (currentMonotonicMillis - actionFirstSeenAtMillis
-                    >= requiredStabilizationWindowMillis) {
-                state = StabilizationState.FIRING;
-            }
+        if (state == StabilizationState.WAITING
+                && currentMonotonicMillis - actionFirstSeenAtMillis
+                        >= requiredStabilizationWindowMillis) {
+            // Enter firing once the same action has satisfied its stabilization window.
+            state = StabilizationState.FIRING;
         }
         return state;
     }
@@ -69,7 +68,7 @@ public final class StabilizationTracker {
     private void clear() {
         lastAction = null;
         actionFirstSeenAtMillis = 0L;
-        state = StabilizationState.NOT_APPLICABLE;
+        state = StabilizationState.NORMAL;
     }
 
     private long getRequiredStabilizationWindowMillis(ScalingAction action) {
@@ -83,8 +82,8 @@ public final class StabilizationTracker {
     }
 
     public enum StabilizationState {
-        /** No scaling action requires stabilization. */
-        NOT_APPLICABLE,
+        /** No scale-out or scale-in condition is currently active. */
+        NORMAL,
 
         /** A scaling action is being observed but has not satisfied its stabilization window. */
         WAITING,

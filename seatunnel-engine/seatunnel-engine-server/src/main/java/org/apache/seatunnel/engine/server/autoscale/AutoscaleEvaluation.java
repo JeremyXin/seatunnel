@@ -28,26 +28,19 @@ public final class AutoscaleEvaluation implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final ScalingAction action;
-    private final List<String> triggerReasons;
-    private final List<String> blockingReasons;
+    private final List<String> decisionReasons;
 
-    public AutoscaleEvaluation(
-            ScalingAction action, List<String> triggerReasons, List<String> blockingReasons) {
+    public AutoscaleEvaluation(ScalingAction action, List<String> decisionReasons) {
         this.action = Objects.requireNonNull(action, "action");
-        this.triggerReasons = immutableCopy(triggerReasons);
-        this.blockingReasons = immutableCopy(blockingReasons);
+        this.decisionReasons = immutableCopy(decisionReasons);
     }
 
     public ScalingAction getAction() {
         return action;
     }
 
-    public List<String> getTriggerReasons() {
-        return triggerReasons;
-    }
-
-    public List<String> getBlockingReasons() {
-        return blockingReasons;
+    public List<String> getDecisionReasons() {
+        return decisionReasons;
     }
 
     private static List<String> immutableCopy(List<String> values) {

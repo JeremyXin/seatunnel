@@ -46,7 +46,7 @@ class HierarchicalAutoscalingPolicyTest {
 
         Assertions.assertEquals(ScalingAction.SCALE_OUT, evaluation.getAction());
         Assertions.assertTrue(
-                evaluation.getTriggerReasons().contains("scheduler_resource_shortage"));
+                evaluation.getDecisionReasons().contains("scheduler_resource_shortage"));
     }
 
     @Test
@@ -60,7 +60,7 @@ class HierarchicalAutoscalingPolicyTest {
                                 .build());
 
         Assertions.assertEquals(ScalingAction.SCALE_OUT, evaluation.getAction());
-        Assertions.assertTrue(evaluation.getTriggerReasons().contains("cpu_utilization_high"));
+        Assertions.assertTrue(evaluation.getDecisionReasons().contains("cpu_utilization_high"));
     }
 
     @Test
@@ -75,7 +75,7 @@ class HierarchicalAutoscalingPolicyTest {
 
         Assertions.assertEquals(ScalingAction.SCALE_OUT, evaluation.getAction());
         Assertions.assertTrue(
-                evaluation.getTriggerReasons().contains("jvm_memory_utilization_high"));
+                evaluation.getDecisionReasons().contains("jvm_memory_utilization_high"));
     }
 
     @Test
@@ -89,7 +89,7 @@ class HierarchicalAutoscalingPolicyTest {
                                 .build());
 
         Assertions.assertEquals(ScalingAction.NO_ACTION, evaluation.getAction());
-        Assertions.assertTrue(evaluation.getTriggerReasons().isEmpty());
+        Assertions.assertTrue(evaluation.getDecisionReasons().contains("no_scaling_condition_met"));
     }
 
     @Test
@@ -105,7 +105,7 @@ class HierarchicalAutoscalingPolicyTest {
 
         Assertions.assertEquals(ScalingAction.SCALE_OUT, evaluation.getAction());
         Assertions.assertTrue(
-                evaluation.getTriggerReasons().contains("slot_pressure_with_scheduling_pressure"));
+                evaluation.getDecisionReasons().contains("slot_pressure_with_scheduling_pressure"));
     }
 
     @Test
@@ -151,7 +151,7 @@ class HierarchicalAutoscalingPolicyTest {
 
         Assertions.assertEquals(ScalingAction.SCALE_IN_BLOCKED, evaluation.getAction());
         Assertions.assertTrue(
-                evaluation.getBlockingReasons().contains("scale_in_metrics_incomplete"));
+                evaluation.getDecisionReasons().contains("scale_in_metrics_incomplete"));
     }
 
     @Test
@@ -179,7 +179,7 @@ class HierarchicalAutoscalingPolicyTest {
 
         Assertions.assertEquals(ScalingAction.SCALE_OUT, evaluation.getAction());
         Assertions.assertTrue(
-                evaluation.getTriggerReasons().contains("jvm_memory_utilization_high"));
+                evaluation.getDecisionReasons().contains("jvm_memory_utilization_high"));
     }
 
     @Test
@@ -210,7 +210,7 @@ class HierarchicalAutoscalingPolicyTest {
                                 .build());
 
         Assertions.assertEquals(ScalingAction.NO_ACTION, evaluation.getAction());
-        Assertions.assertTrue(evaluation.getBlockingReasons().contains("min_workers_reached"));
+        Assertions.assertTrue(evaluation.getDecisionReasons().contains("min_workers_reached"));
     }
 
     private AutoscalerMetricsSnapshot.Builder baseSnapshot() {

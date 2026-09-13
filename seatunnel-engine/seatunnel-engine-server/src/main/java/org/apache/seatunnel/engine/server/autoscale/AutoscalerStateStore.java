@@ -19,6 +19,8 @@ package org.apache.seatunnel.engine.server.autoscale;
 
 public interface AutoscalerStateStore {
 
+    void updateCurrentSnapshot(AutoscalerMetricsSnapshot snapshot);
+
     RecommendationFence.PublicationResult publish(ScalingRecommendation recommendation);
 
     void clear();

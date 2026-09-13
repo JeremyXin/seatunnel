@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 class DefaultAutoScalerTest {
 
     @Test
-    void publishesNoActionUntilScaleOutStabilizesThenClampsTarget() {
+    void publishesScaleOutWhileWaitingForStabilizationThenClampsTarget() {
         AutoscalerRuntimeConfig config =
                 AutoscalerRuntimeConfig.builder()
                         .scaleOutStabilizationSeconds(300)
@@ -44,8 +44,12 @@ class DefaultAutoScalerTest {
 
         autoscaler.evaluateOnce();
         Assertions.assertEquals(
-                ScalingAction.NO_ACTION,
+                ScalingAction.SCALE_OUT,
                 store.view(true, true).getLatestRecommendation().getAction());
+
+        timeSource.monotonicMillis = 1_000L;
+        autoscaler.evaluateOnce();
+        Assertions.assertEquals(1, store.view(true, true).getHistory().size());
 
         timeSource.monotonicMillis = 300_000L;
         autoscaler.evaluateOnce();
@@ -54,7 +58,7 @@ class DefaultAutoScalerTest {
         Assertions.assertEquals(ScalingAction.SCALE_OUT, recommendation.getAction());
         Assertions.assertEquals(4, recommendation.getRecommendedWorkers());
         Assertions.assertEquals(7L, recommendation.getMasterEpoch());
-        Assertions.assertEquals(1L, recommendation.getGeneration());
+        Assertions.assertEquals(2L, recommendation.getGeneration());
     }
 
     @Test
@@ -80,6 +84,82 @@ class DefaultAutoScalerTest {
         ScalingRecommendation recommendation = store.view(true, true).getLatestRecommendation();
         Assertions.assertEquals(9L, recommendation.getMasterEpoch());
         Assertions.assertEquals(0L, recommendation.getGeneration());
+    }
+
+    @Test
+    void republishesPersistentFiringRecommendationAfterRepeatInterval() {
+        AutoscalerRuntimeConfig config =
+                AutoscalerRuntimeConfig.builder()
+                        .scaleOutStabilizationSeconds(1)
+                        .recommendationRepeatSeconds(60)
+                        .build();
+        FakeTimeSource timeSource = new FakeTimeSource(1_000L, 0L);
+        InMemoryAutoscalerStateStore store = new InMemoryAutoscalerStateStore(10);
+        DefaultAutoScaler autoscaler =
+                new DefaultAutoScaler(
+                        10L,
+                        config,
+                        () -> baseSnapshot().cpu(MetricValue.valid(0.9d)).build(),
+                        new HierarchicalAutoscalingPolicy(DefaultAutoScaler.policyConfig(config)),
+                        new StabilizationTracker(1_000L, 1_000L),
+                        store,
+                        timeSource);
+
+        autoscaler.evaluateOnce();
+        timeSource.monotonicMillis = 1_000L;
+        autoscaler.evaluateOnce();
+        Assertions.assertEquals(2, store.view(true, true).getHistory().size());
+
+        timeSource.monotonicMillis = 60_999L;
+        autoscaler.evaluateOnce();
+        Assertions.assertEquals(2, store.view(true, true).getHistory().size());
+
+        timeSource.monotonicMillis = 61_000L;
+        autoscaler.evaluateOnce();
+        Assertions.assertEquals(3, store.view(true, true).getHistory().size());
+        Assertions.assertEquals(
+                ScalingAction.SCALE_OUT,
+                store.view(true, true).getLatestRecommendation().getAction());
+    }
+
+    @Test
+    void doesNotRepublishFiringRecommendationBeforeRepeatIntervalWhenTargetWorkerCountChanges() {
+        AutoscalerRuntimeConfig config =
+                AutoscalerRuntimeConfig.builder()
+                        .scaleOutStabilizationSeconds(1)
+                        .recommendationRepeatSeconds(60)
+                        .build();
+        FakeTimeSource timeSource = new FakeTimeSource(1_000L, 0L);
+        InMemoryAutoscalerStateStore store = new InMemoryAutoscalerStateStore(10);
+        int[] currentWorkers = {3};
+        DefaultAutoScaler autoscaler =
+                new DefaultAutoScaler(
+                        11L,
+                        config,
+                        () ->
+                                baseSnapshot()
+                                        .currentWorkers(currentWorkers[0])
+                                        .cpu(MetricValue.valid(0.9d))
+                                        .build(),
+                        new HierarchicalAutoscalingPolicy(DefaultAutoScaler.policyConfig(config)),
+                        new StabilizationTracker(1_000L, 1_000L),
+                        store,
+                        timeSource);
+
+        autoscaler.evaluateOnce();
+        timeSource.monotonicMillis = 1_000L;
+        autoscaler.evaluateOnce();
+        Assertions.assertEquals(
+                4, store.view(true, true).getLatestRecommendation().getRecommendedWorkers());
+
+        currentWorkers[0] = 4;
+        timeSource.monotonicMillis = 2_000L;
+        autoscaler.evaluateOnce();
+
+        Assertions.assertEquals(2, store.view(true, true).getHistory().size());
+        Assertions.assertEquals(
+                4, store.view(true, true).getLatestRecommendation().getRecommendedWorkers());
+        Assertions.assertEquals(4, store.view(true, true).getCurrentSnapshot().getCurrentWorkers());
     }
 
     private AutoscalerMetricsSnapshot.Builder baseSnapshot() {

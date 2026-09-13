@@ -27,7 +27,7 @@ import java.util.Objects;
  * Immutable autoscaler output for one evaluation generation.
  *
  * <p>Phase 1 recommendations are diagnostic only and include the input snapshot plus trigger and
- * blocking reasons.
+ * decision reasons.
  */
 public final class ScalingRecommendation implements Serializable {
 
@@ -36,12 +36,12 @@ public final class ScalingRecommendation implements Serializable {
     private final long masterEpoch;
     private final long generation;
     private final ScalingAction action;
+    private final StabilizationTracker.StabilizationState stabilizationState;
     private final int currentWorkers;
     private final int recommendedWorkers;
     private final long observedAtMillis;
     private final long validUntilMillis;
-    private final List<String> triggerReasons;
-    private final List<String> blockingReasons;
+    private final List<String> decisionReasons;
     private final AutoscalerMetricsSnapshot snapshot;
     private final boolean recommendationOnly;
 
@@ -49,12 +49,13 @@ public final class ScalingRecommendation implements Serializable {
         this.masterEpoch = builder.masterEpoch;
         this.generation = builder.generation;
         this.action = Objects.requireNonNull(builder.action, "action");
+        this.stabilizationState =
+                Objects.requireNonNull(builder.stabilizationState, "stabilizationState");
         this.currentWorkers = builder.currentWorkers;
         this.recommendedWorkers = builder.recommendedWorkers;
         this.observedAtMillis = builder.observedAtMillis;
         this.validUntilMillis = builder.validUntilMillis;
-        this.triggerReasons = immutableCopy(builder.triggerReasons);
-        this.blockingReasons = immutableCopy(builder.blockingReasons);
+        this.decisionReasons = immutableCopy(builder.decisionReasons);
         this.snapshot = Objects.requireNonNull(builder.snapshot, "snapshot");
         this.recommendationOnly = builder.recommendationOnly;
     }
@@ -75,6 +76,10 @@ public final class ScalingRecommendation implements Serializable {
         return action;
     }
 
+    public StabilizationTracker.StabilizationState getStabilizationState() {
+        return stabilizationState;
+    }
+
     public int getCurrentWorkers() {
         return currentWorkers;
     }
@@ -91,12 +96,8 @@ public final class ScalingRecommendation implements Serializable {
         return validUntilMillis;
     }
 
-    public List<String> getTriggerReasons() {
-        return triggerReasons;
-    }
-
-    public List<String> getBlockingReasons() {
-        return blockingReasons;
+    public List<String> getDecisionReasons() {
+        return decisionReasons;
     }
 
     public AutoscalerMetricsSnapshot getSnapshot() {
@@ -116,12 +117,13 @@ public final class ScalingRecommendation implements Serializable {
         private long masterEpoch;
         private long generation;
         private ScalingAction action = ScalingAction.NO_ACTION;
+        private StabilizationTracker.StabilizationState stabilizationState =
+                StabilizationTracker.StabilizationState.NORMAL;
         private int currentWorkers;
         private int recommendedWorkers;
         private long observedAtMillis;
         private long validUntilMillis;
-        private List<String> triggerReasons = Collections.emptyList();
-        private List<String> blockingReasons = Collections.emptyList();
+        private List<String> decisionReasons = Collections.emptyList();
         private AutoscalerMetricsSnapshot snapshot = AutoscalerMetricsSnapshot.builder().build();
         private boolean recommendationOnly = true;
 
@@ -137,6 +139,12 @@ public final class ScalingRecommendation implements Serializable {
 
         public Builder action(ScalingAction action) {
             this.action = action;
+            return this;
+        }
+
+        public Builder stabilizationState(
+                StabilizationTracker.StabilizationState stabilizationState) {
+            this.stabilizationState = stabilizationState;
             return this;
         }
 
@@ -160,13 +168,8 @@ public final class ScalingRecommendation implements Serializable {
             return this;
         }
 
-        public Builder triggerReasons(List<String> triggerReasons) {
-            this.triggerReasons = triggerReasons;
-            return this;
-        }
-
-        public Builder blockingReasons(List<String> blockingReasons) {
-            this.blockingReasons = blockingReasons;
+        public Builder decisionReasons(List<String> decisionReasons) {
+            this.decisionReasons = decisionReasons;
             return this;
         }
 
