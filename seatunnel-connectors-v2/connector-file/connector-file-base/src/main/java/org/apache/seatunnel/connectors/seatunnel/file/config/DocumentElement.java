@@ -64,6 +64,10 @@ public class DocumentElement {
         this.text = text;
     }
 
+    public DocumentElement(DocumentElementType elementType, String text) {
+        this(elementType.getValue(), text);
+    }
+
     public DocumentElement(
             String elementType, String text, Integer pageNumber, Integer positionIndex) {
         this(elementType, text);
@@ -86,6 +90,10 @@ public class DocumentElement {
 
     public void setElementType(String elementType) {
         this.elementType = elementType;
+    }
+
+    public void setElementType(DocumentElementType elementType) {
+        this.elementType = elementType.getValue();
     }
 
     public Integer getHeadingLevel() {
@@ -133,7 +141,7 @@ public class DocumentElement {
     }
 
     public void setChildIds(List<String> childIds) {
-        this.childIds = childIds;
+        this.childIds = childIds == null ? new ArrayList<>() : childIds;
     }
 
     /** Add the child element ID */
@@ -187,7 +195,7 @@ public class DocumentElement {
                     pageNumber,
                     positionIndex,
                     parentId,
-                    childIds == null || childIds.isEmpty() ? null : childIds.toArray(new String[0])
+                    childIds == null ? new String[0] : childIds.toArray(new String[0])
                 });
     }
 }

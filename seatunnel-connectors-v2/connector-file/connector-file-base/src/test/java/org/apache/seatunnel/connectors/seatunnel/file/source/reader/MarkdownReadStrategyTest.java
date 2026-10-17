@@ -19,6 +19,7 @@ package org.apache.seatunnel.connectors.seatunnel.file.source.reader;
 
 import org.apache.seatunnel.shade.com.typesafe.config.ConfigFactory;
 
+import org.apache.seatunnel.api.table.type.ArrayType;
 import org.apache.seatunnel.api.table.type.KnowledgeSyncMetadataField;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
@@ -38,6 +39,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.FS_DEFAULT_NAME_DEFAULT;
@@ -66,6 +68,111 @@ class MarkdownReadStrategyTest {
     @TempDir private Path tempDir;
 
     @Test
+    void testMarkdownEmitsDocumentElementHierarchy() throws Exception {
+        Path path = tempDir.resolve("headings.md");
+        Files.write(
+                path,
+                ("# Data Source Configuration\n\n"
+                                + "## Kafka Configuration\n"
+                                + "Users can configure Kafka.\n\n"
+                                + "## MySQL Configuration\n"
+                                + "MySQL requires a JDBC URL.\n\n"
+                                + "### Notes\n"
+                                + "Test the connection before deploying.\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        AbstractReadStrategy strategy = createMarkdownReadStrategy();
+        TempCollector collector = new TempCollector();
+        strategy.read(path.toString(), "", collector);
+
+        List<SeaTunnelRow> rows = collector.getRows();
+        Assertions.assertEquals(7, rows.size());
+        Assertions.assertEquals("heading", rows.get(0).getField(1));
+        Assertions.assertEquals("paragraph", rows.get(2).getField(1));
+        Assertions.assertEquals("Notes", rows.get(5).getField(3));
+        for (int i = 0; i < rows.size(); i++) {
+            Assertions.assertEquals(1, rows.get(i).getField(4));
+            Assertions.assertEquals(i + 1, rows.get(i).getField(5));
+            Assertions.assertInstanceOf(String[].class, rows.get(i).getField(7));
+        }
+        Assertions.assertEquals("Heading_1", rows.get(0).getField(0));
+        Assertions.assertEquals("Heading_2", rows.get(1).getField(0));
+        Assertions.assertEquals("Paragraph_1", rows.get(2).getField(0));
+        String rootId = (String) rows.get(0).getField(0);
+        String kafkaId = (String) rows.get(1).getField(0);
+        String mysqlId = (String) rows.get(3).getField(0);
+        String notesId = (String) rows.get(5).getField(0);
+        Assertions.assertArrayEquals(
+                new String[] {kafkaId, mysqlId}, (String[]) rows.get(0).getField(7));
+        Assertions.assertEquals(rootId, rows.get(1).getField(6));
+        Assertions.assertEquals(kafkaId, rows.get(2).getField(6));
+        Assertions.assertEquals(rootId, rows.get(3).getField(6));
+        Assertions.assertEquals(mysqlId, rows.get(5).getField(6));
+        Assertions.assertEquals(notesId, rows.get(6).getField(6));
+        Assertions.assertArrayEquals(new String[0], (String[]) rows.get(6).getField(7));
+    }
+
+    @Test
+    void testNestedListUsesImmediateParentAndSharedPdfSchema() throws Exception {
+        Path path = tempDir.resolve("nested-list.md");
+        Files.write(
+                path,
+                "# Title\n\n- First\n  - Nested\n- Second\n".getBytes(StandardCharsets.UTF_8));
+        AbstractReadStrategy strategy = createMarkdownReadStrategy();
+        SeaTunnelRowType markdownType = strategy.getSeaTunnelRowTypeInfo(path.toString());
+        SeaTunnelRowType pdfType = new PdfReadStrategy().getSeaTunnelRowTypeInfo(path.toString());
+        TempCollector collector = new TempCollector();
+        strategy.read(path.toString(), "", collector);
+
+        Assertions.assertArrayEquals(pdfType.getFieldNames(), markdownType.getFieldNames());
+        for (int i = 0; i < markdownType.getTotalFields(); i++) {
+            Assertions.assertEquals(pdfType.getFieldType(i), markdownType.getFieldType(i));
+        }
+
+        List<SeaTunnelRow> rows = collector.getRows();
+        Assertions.assertEquals(6, rows.size());
+        Assertions.assertEquals("heading", rows.get(0).getField(1));
+        Assertions.assertEquals("bullet_list", rows.get(1).getField(1));
+        Assertions.assertEquals("bullet_list_item", rows.get(2).getField(1));
+        Assertions.assertEquals("bullet_list", rows.get(3).getField(1));
+        Assertions.assertEquals("bullet_list_item", rows.get(4).getField(1));
+        Assertions.assertEquals("bullet_list_item", rows.get(5).getField(1));
+        Assertions.assertEquals(rows.get(0).getField(0), rows.get(1).getField(6));
+        Assertions.assertEquals(rows.get(1).getField(0), rows.get(2).getField(6));
+        Assertions.assertEquals(rows.get(2).getField(0), rows.get(3).getField(6));
+        Assertions.assertEquals(rows.get(3).getField(0), rows.get(4).getField(6));
+        Assertions.assertEquals(rows.get(1).getField(0), rows.get(5).getField(6));
+        Assertions.assertArrayEquals(
+                new String[] {(String) rows.get(2).getField(0), (String) rows.get(5).getField(0)},
+                (String[]) rows.get(1).getField(7));
+        Assertions.assertArrayEquals(new String[0], (String[]) rows.get(4).getField(7));
+        Assertions.assertEquals(1, rows.get(0).getField(5));
+        Assertions.assertEquals(2, rows.get(1).getField(5));
+        Assertions.assertEquals(1, rows.get(2).getField(5));
+        Assertions.assertEquals(2, rows.get(3).getField(5));
+        Assertions.assertEquals(1, rows.get(4).getField(5));
+        Assertions.assertEquals(2, rows.get(5).getField(5));
+    }
+
+    @Test
+    void testHeadingInsideQuoteDoesNotCaptureFollowingParagraph() throws Exception {
+        Path path = tempDir.resolve("quoted-heading.md");
+        Files.write(
+                path,
+                ("# Main\n\n> ## Quoted\n>\n> Inside quote\n\nOutside quote\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        TempCollector collector = new TempCollector();
+        createMarkdownReadStrategy().read(path.toString(), "", collector);
+
+        List<SeaTunnelRow> rows = collector.getRows();
+        Assertions.assertEquals(4, rows.size());
+        Assertions.assertEquals("block_quote", rows.get(1).getField(1));
+        Assertions.assertEquals("heading", rows.get(2).getField(1));
+        Assertions.assertEquals(rows.get(1).getField(0), rows.get(2).getField(6));
+        Assertions.assertEquals("paragraph", rows.get(3).getField(1));
+        Assertions.assertEquals(rows.get(0).getField(0), rows.get(3).getField(6));
+    }
+
+    @Test
     public void testReadMarkdown() throws Exception {
         URL resource = this.getClass().getResource("/test.md");
         String path = Paths.get(resource.toURI()).toString();
@@ -80,8 +187,10 @@ class MarkdownReadStrategyTest {
                 DEFAULT_FIELD_NAMES.length, tempCollector.getRows().get(0).getArity());
         Assertions.assertNull(tempCollector.getRows().get(0).getOptionsOrNull());
 
-        Assertions.assertEquals("Heading_1", tempCollector.getRows().get(0).getField(0));
-        Assertions.assertEquals("Heading", tempCollector.getRows().get(0).getField(1));
+        List<SeaTunnelRow> rows = tempCollector.getRows();
+        Assertions.assertEquals(ArrayType.STRING_ARRAY_TYPE, rowType.getFieldType(7));
+        Assertions.assertEquals("Heading_1", rows.get(0).getField(0));
+        Assertions.assertEquals("heading", rows.get(0).getField(1));
         Assertions.assertEquals(1, tempCollector.getRows().get(0).getField(2));
         Assertions.assertEquals(
                 "The Essential Guide to Groceries: Shopping, Storing, and Enjoying Food at Home",
@@ -89,10 +198,10 @@ class MarkdownReadStrategyTest {
         Assertions.assertEquals(1, tempCollector.getRows().get(0).getField(4));
         Assertions.assertEquals(1, tempCollector.getRows().get(0).getField(5));
         Assertions.assertNull(tempCollector.getRows().get(0).getField(6));
-        Assertions.assertNull(tempCollector.getRows().get(0).getField(7));
+        Assertions.assertTrue(((String[]) tempCollector.getRows().get(0).getField(7)).length > 0);
 
-        Assertions.assertEquals("OrderedList_1", tempCollector.getRows().get(3).getField(0));
-        Assertions.assertEquals("OrderedList", tempCollector.getRows().get(3).getField(1));
+        Assertions.assertEquals("OrderedList_1", rows.get(3).getField(0));
+        Assertions.assertEquals("ordered_list", rows.get(3).getField(1));
         Assertions.assertNull(tempCollector.getRows().get(3).getField(2));
         Assertions.assertEquals(
                 "1. [Introduction](#introduction)\n"
@@ -107,20 +216,27 @@ class MarkdownReadStrategyTest {
                 tempCollector.getRows().get(3).getField(3));
         Assertions.assertEquals(1, tempCollector.getRows().get(3).getField(4));
         Assertions.assertEquals(5, tempCollector.getRows().get(3).getField(5));
-        Assertions.assertNull(tempCollector.getRows().get(3).getField(6));
-        Assertions.assertEquals(
-                "OrderedListItem_1,OrderedListItem_2,OrderedListItem_3,OrderedListItem_4,OrderedListItem_5,OrderedListItem_6,OrderedListItem_7,OrderedListItem_8,OrderedListItem_9",
-                tempCollector.getRows().get(3).getField(7));
+        Assertions.assertEquals(rows.get(2).getField(0), rows.get(3).getField(6));
+        String[] listItemIds = new String[9];
+        for (int i = 0; i < listItemIds.length; i++) {
+            listItemIds[i] = (String) rows.get(i + 4).getField(0);
+        }
+        Assertions.assertArrayEquals(listItemIds, (String[]) rows.get(3).getField(7));
 
-        Assertions.assertEquals("OrderedListItem_1", tempCollector.getRows().get(4).getField(0));
-        Assertions.assertEquals("OrderedListItem", tempCollector.getRows().get(4).getField(1));
+        Assertions.assertEquals("ordered_list_item", tempCollector.getRows().get(4).getField(1));
         Assertions.assertNull(tempCollector.getRows().get(4).getField(2));
         Assertions.assertEquals(
                 "[Introduction](#introduction)", tempCollector.getRows().get(4).getField(3));
         Assertions.assertEquals(1, tempCollector.getRows().get(4).getField(4));
         Assertions.assertEquals(1, tempCollector.getRows().get(4).getField(5));
-        Assertions.assertEquals("OrderedList_1", tempCollector.getRows().get(4).getField(6));
-        Assertions.assertNull(tempCollector.getRows().get(4).getField(7));
+        Assertions.assertEquals(rows.get(3).getField(0), rows.get(4).getField(6));
+        Assertions.assertArrayEquals(new String[0], (String[]) rows.get(4).getField(7));
+
+        for (int i = 0; i < rows.size(); i++) {
+            Assertions.assertTrue((Integer) rows.get(i).getField(5) >= 1);
+            Assertions.assertEquals(1, rows.get(i).getField(4));
+            Assertions.assertInstanceOf(String[].class, rows.get(i).getField(7));
+        }
     }
 
     @Test
@@ -234,9 +350,9 @@ class MarkdownReadStrategyTest {
 
         // TablesExtension is intentionally disabled today, so the table remains one paragraph.
         Assertions.assertEquals(2, collector.getRows().size());
-        Assertions.assertEquals("Heading", collector.getRows().get(0).getField(1));
+        Assertions.assertEquals("heading", collector.getRows().get(0).getField(1));
         Assertions.assertEquals("Sheet1", collector.getRows().get(0).getField(3));
-        Assertions.assertEquals("Paragraph", collector.getRows().get(1).getField(1));
+        Assertions.assertEquals("paragraph", collector.getRows().get(1).getField(1));
         Assertions.assertTrue(
                 String.valueOf(collector.getRows().get(1).getField(3)).contains("Cosmos"));
         String canonicalSourceUri =

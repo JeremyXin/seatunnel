@@ -19,6 +19,7 @@ package org.apache.seatunnel.connectors.seatunnel.file.source.reader;
 
 import org.apache.seatunnel.shade.com.typesafe.config.ConfigFactory;
 
+import org.apache.seatunnel.api.table.type.ArrayType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 import org.apache.seatunnel.connectors.seatunnel.file.config.DocumentElement;
@@ -120,6 +121,7 @@ public class PdfReadStrategyTest {
         // check link element type
         int lastIndex = rows.size() - 1;
         Assertions.assertEquals("link", rows.get(lastIndex).getField(1));
+        Assertions.assertArrayEquals(new String[0], (String[]) rows.get(lastIndex).getField(7));
         // check link element text
         Assertions.assertEquals("https://example.com", rows.get(lastIndex).getField(3));
         // check link element page
@@ -149,6 +151,7 @@ public class PdfReadStrategyTest {
 
         Assertions.assertArrayEquals(
                 concat(DEFAULT_FIELD_NAMES, RAG_FIELD_NAMES), rowType.getFieldNames());
+        Assertions.assertEquals(ArrayType.STRING_ARRAY_TYPE, rowType.getFieldType(7));
         Assertions.assertFalse(firstCollector.getRows().isEmpty());
         Assertions.assertEquals(13, firstCollector.getRows().get(0).getArity());
         Assertions.assertEquals(path, firstCollector.getRows().get(0).getField(8));
@@ -207,10 +210,12 @@ public class PdfReadStrategyTest {
 
         for (SeaTunnelRow row : tempCollector.getRows()) {
             Object childIdsField = row.getField(7);
-            Assertions.assertTrue(
-                    childIdsField == null || childIdsField instanceof String[],
-                    "child_ids must be null or String[], got: "
-                            + (childIdsField == null ? "null" : childIdsField.getClass()));
+            Assertions.assertInstanceOf(String[].class, childIdsField);
+            if ("paragraph".equals(row.getField(1))
+                    || "image".equals(row.getField(1))
+                    || "link".equals(row.getField(1))) {
+                Assertions.assertArrayEquals(new String[0], (String[]) childIdsField);
+            }
         }
     }
 
@@ -262,6 +267,10 @@ public class PdfReadStrategyTest {
                             .collect(Collectors.toList());
             Assertions.assertFalse(
                     images.isEmpty(), "Should have image elements for no-outline PDF");
+
+            for (int i = 0; i < rows.size(); i++) {
+                Assertions.assertEquals(i, rows.get(i).getField(5));
+            }
 
             for (SeaTunnelRow imageRow : images) {
                 String text = (String) imageRow.getField(3);

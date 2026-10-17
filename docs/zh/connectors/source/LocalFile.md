@@ -203,16 +203,17 @@ schema {
 您可以在下面的示例中找到具体用法。
 
 如果您将文件类型指定为 `markdown`，SeaTunnel 可以解析 markdown 文件并提取结构化数据。
-markdown 解析器提取各种元素，包括标题、段落、列表、代码块、表格等。
-每个提取出的元素都会转换为一条文档元素结构化记录，schema 如下：
-- `element_id`：元素的唯一标识符
-- `element_type`：元素类型（Heading、Paragraph、ListItem 等）
-- `heading_level`：标题级别（1-6，非标题元素为 null）
-- `text`：元素的文本内容
-- `page_number`：页码（默认：1）
-- `position_index`：文档中的位置索引
-- `parent_id`：父元素的 ID
-- `child_ids`：子元素 ID 的逗号分隔列表
+markdown 解析器提取标题、段落、列表和代码块等元素。
+Markdown 和 PDF source 按以下顺序输出相同的八个文档元素字段：
+
+- `element_id`（`STRING`）：Markdown 使用按类型计数的编号（如 `Heading_1`）；PDF 使用基于 UUID 的编号。同一文档中的父子引用使用这些值。
+- `element_type`（`STRING`）：小写下划线形式的元素类型，例如 `heading`、`paragraph`、`ordered_list`、`image`。每种解析器只输出其实际能够提取的元素类型。
+- `heading_level`（`INT`）：标题级别（1–6）；其他元素为 `null`。
+- `text`（`STRING`）：元素的文本内容。
+- `page_number`（`INT`）：PDF 实际页码从 1 开始；Markdown 使用占位值 `1`。
+- `position_index`（`INT`）：Markdown 使用同级 AST 节点中从 1 开始的位置；PDF 使用文档输出顺序中从 0 开始的位置。
+- `parent_id`（`STRING`）：父元素的 ID；根元素为 `null`。标题形成层级，正文归属于最近的标题或其所在的容器元素。
+- `child_ids`（`ARRAY<STRING>`）：按文档顺序排列的直接子元素 ID；叶子元素为空数组。
 
 当 `markdown_rag_metadata_enabled` 或 `pdf_rag_metadata_enabled` 设置为 `true` 时，SeaTunnel 会针对对应文件类型在 `child_ids` 之后追加以下 RAG 元数据字段：
 - `source_uri`：源文件路径或 URI
@@ -223,7 +224,7 @@ markdown 解析器提取各种元素，包括标题、段落、列表、代码�
 
 启用该选项并读取有界 Markdown 文件时，source enumerator 会使用相同的 `document_id` 哈希分配整文件 split，使同一文档派生的所有行留在同一个 source 路由 bucket 中。禁用该选项时，默认的轮询 split 分配行为保持不变。
 
-该选项默认值为 `false`，因此只有显式启用后才会改变原始 Markdown schema。
+该选项默认值为 `false`，因此仅在启用后才会追加五个 RAG 字段。上述八个文档元素字段不受该选项影响。
 
 当 `markdown_rag_metadata_enabled=true` 时，每个 Markdown 行还会在 row options 中携带四个 Knowledge Sync 逻辑元数据值，source 也会在 metadata schema 中声明相同 Key：
 
@@ -240,8 +241,7 @@ markdown 解析器提取各种元素，包括标题、段落、列表、代码�
 
 注意：Markdown 格式仅支持读取，不支持写入。
 
-如果您将文件类型指定为 `pdf`，SeaTunnel 可以解析 PDF 文件并提取结构化的文档元素。
-PDF 使用与上文相同的文档元素 schema。
+如果您将文件类型指定为 `pdf`，SeaTunnel 可以解析 PDF 文件并按上述八字段 schema 输出结构化文档元素。
 对于 PDF 输入，启用 `pdf_rag_metadata_enabled` 即可追加上文所述的 RAG 元数据字段。
 
 PDF 特有的解析行为如下：

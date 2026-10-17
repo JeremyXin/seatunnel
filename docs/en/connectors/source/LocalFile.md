@@ -203,16 +203,17 @@ Under this requirement, you need to ensure that the source and sink use `binary`
 at the same time. You can find the specific usage in the example below.
 
 If you assign file type to `markdown`, SeaTunnel can parse markdown files and extract structured data.
-The markdown parser extracts various elements including headings, paragraphs, lists, code blocks, tables, and more.
-Each extracted element is converted to a document-element row with the following schema:
-- `element_id`: Unique identifier for the element
-- `element_type`: Type of the element (Heading, Paragraph, ListItem, etc.)
-- `heading_level`: Level of heading (1-6, null for non-heading elements)
-- `text`: Text content of the element
-- `page_number`: Page number (default: 1)
-- `position_index`: Position index within the document
-- `parent_id`: ID of the parent element
-- `child_ids`: Comma-separated list of child element IDs
+The markdown parser extracts elements such as headings, paragraphs, lists, and code blocks.
+Markdown and PDF sources emit document-element rows with the same eight fields, in this order:
+
+- `element_id` (`STRING`): Markdown uses a per-type counter such as `Heading_1`; PDF uses a UUID-based identifier. Parent and child references use these values within the document.
+- `element_type` (`STRING`): A lowercase snake_case element type, such as `heading`, `paragraph`, `ordered_list`, or `image`. Each parser emits only the element types it can extract.
+- `heading_level` (`INT`): Heading level (1–6); `null` for other elements.
+- `text` (`STRING`): Text content of the element.
+- `page_number` (`INT`): Actual PDF page number, starting at 1; Markdown uses the placeholder value `1`.
+- `position_index` (`INT`): Markdown uses a one-based position among sibling AST nodes; PDF uses zero-based document output order.
+- `parent_id` (`STRING`): ID of the parent element, or `null` for a root element. Headings form a hierarchy; content belongs to its nearest heading or enclosing element.
+- `child_ids` (`ARRAY<STRING>`): IDs of direct children in document order; an empty array for a leaf element.
 
 When either `markdown_rag_metadata_enabled` or `pdf_rag_metadata_enabled` is set to `true`, SeaTunnel appends the following RAG metadata fields after `child_ids` for the corresponding file type:
 - `source_uri`: Source file path or URI
@@ -223,7 +224,7 @@ When either `markdown_rag_metadata_enabled` or `pdf_rag_metadata_enabled` is set
 
 When this option is enabled for bounded Markdown file sources, the source enumerator assigns each whole-file split by the same `document_id` hash so all rows derived from one document stay in the same source route bucket. The default round-robin split assignment is unchanged when the option is disabled.
 
-The option defaults to `false`, so the original Markdown schema is unchanged unless you enable it.
+The option defaults to `false`, so the five RAG fields are omitted unless you enable it. The eight document-element fields above are the same with either setting.
 
 When `markdown_rag_metadata_enabled=true`, each Markdown row also carries four logical Knowledge Sync metadata values in row options, and the source declares the same keys in its metadata schema:
 
@@ -240,8 +241,7 @@ Logical `ChunkHash` describes only the immediate Markdown output row. After a tr
 
 Note: Markdown format only supports reading, not writing.
 
-If you assign file type to `pdf`, SeaTunnel can parse PDF files and extract structured document elements.
-PDF uses the same document-element row schema described above.
+If you assign file type to `pdf`, SeaTunnel can parse PDF files and extract structured document elements using the eight-field schema above.
 For PDF input, enable `pdf_rag_metadata_enabled` to append the RAG metadata fields described above.
 
 The main PDF-specific behaviors are:

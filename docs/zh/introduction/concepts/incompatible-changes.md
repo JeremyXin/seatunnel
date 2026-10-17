@@ -4,6 +4,13 @@
 
 ## dev
 
+### File Source 的 Markdown 和 PDF 文档元素行
+
+- **破坏性变更**：Markdown 和 PDF source 统一使用文档元素 schema。八个基础字段的名称与顺序不变，但 Markdown 的 `child_ids` 从逗号分隔的 `STRING`（或 `null`）改为 `ARRAY<STRING>`（叶子元素为空数组）。PDF 叶子元素的 `child_ids` 也由 `null` 改为空数组。
+- **影响范围**：通过 `connector-file-base` 读取 `markdown` 或 `pdf` 的 File source 连接器。
+- **影响**：Markdown 的 `element_type` 从解析器类名改为小写下划线值。Markdown 保留原有的按类型计数的 `element_id`、同级从 1 开始的 `position_index`，以及值为 `1` 的占位 `page_number`。Markdown 的标题和正文采用标题层级关系。PDF 字段名称和实际页码不变；PDF 叶子元素改为空数组会影响空值判断。五个可选的物理 RAG 字段和 Markdown 专属的 Knowledge Sync row options 保持现有行为。
+- **迁移指南**：将下游 `child_ids` schema 改为 `ARRAY<STRING>`，用数组处理替代字符串分割或对叶子元素的 `null` 判断。按小写下划线值比较 `element_type`。Markdown 的元素 ID、位置和页码保留原有格式；由于标题现在形成层级，请重新检查依赖 `parent_id` 的分组逻辑。重启消费这些字段的作业前，检查 sink 和保存的 schema。
+
 ### 运行环境要求
 
 - **破坏性变更：最低 Java 运行时从 Java 8 提升到 Java 11**

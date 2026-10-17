@@ -5,6 +5,13 @@ You need to check this document before you upgrade to related version.
 
 ## dev
 
+### File source Markdown and PDF document-element rows
+
+- **Breaking change**: Markdown and PDF sources now use one document-element schema. The eight base fields keep their names and order, but Markdown `child_ids` changes from a comma-separated `STRING` (or `null`) to `ARRAY<STRING>` (empty for leaves). PDF leaf `child_ids` also changes from `null` to an empty array.
+- **Affected component**: File source connectors reading `markdown` or `pdf` through `connector-file-base`.
+- **Impact**: Markdown `element_type` values use lowercase snake_case instead of parser class names. Markdown retains its per-type `element_id` counters, one-based sibling `position_index`, and placeholder `page_number` of `1`. Markdown headings and content use a heading hierarchy. PDF field names and existing page numbers remain unchanged; the empty array for PDF leaves affects null checks. The five optional physical RAG fields and Markdown-only Knowledge Sync row options keep their existing behavior.
+- **Migration guide**: Update downstream schemas for `child_ids` to `ARRAY<STRING>` and replace string splitting or null leaf checks with array handling. Compare `element_type` with lowercase snake_case values. Markdown element IDs, positions, and page numbers retain their previous formats; recheck any grouping that depends on `parent_id` because headings now form a hierarchy. Review sinks and saved schemas before restarting jobs that consume these fields.
+
 ### Runtime Requirements
 
 - **Breaking Change: Minimum Java runtime raised from Java 8 to Java 11**

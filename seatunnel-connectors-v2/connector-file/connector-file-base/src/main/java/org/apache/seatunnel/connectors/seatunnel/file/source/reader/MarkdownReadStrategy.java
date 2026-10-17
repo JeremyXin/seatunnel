@@ -20,15 +20,14 @@ package org.apache.seatunnel.connectors.seatunnel.file.source.reader;
 import org.apache.seatunnel.shade.com.typesafe.config.Config;
 
 import org.apache.seatunnel.api.source.Collector;
-import org.apache.seatunnel.api.table.type.BasicType;
 import org.apache.seatunnel.api.table.type.KnowledgeSyncMetadataField;
-import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
+import org.apache.seatunnel.connectors.seatunnel.file.config.DocumentElement;
+import org.apache.seatunnel.connectors.seatunnel.file.config.DocumentElementType;
 import org.apache.seatunnel.connectors.seatunnel.file.config.FileBaseSourceOptions;
 import org.apache.seatunnel.connectors.seatunnel.file.exception.FileConnectorErrorCode;
 import org.apache.seatunnel.connectors.seatunnel.file.exception.FileConnectorException;
-import org.apache.seatunnel.connectors.seatunnel.file.source.FileSourceDocumentRouting;
 import org.apache.seatunnel.connectors.seatunnel.file.source.MarkdownKnowledgeSyncMetadata;
 
 import org.apache.commons.io.IOUtils;
@@ -49,67 +48,35 @@ import com.vladsch.flexmark.ext.tables.TableCell;
 import com.vladsch.flexmark.ext.tables.TableRow;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
-import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
-@Slf4j
 public class MarkdownReadStrategy extends AbstractReadStrategy {
 
     private static final int DEFAULT_PAGE_NUMBER = 1;
     private static final int DEFAULT_POSITION = 1;
-    private static final String[] DEFAULT_FIELD_NAMES = {
-        "element_id",
-        "element_type",
-        "heading_level",
-        "text",
-        "page_number",
-        "position_index",
-        "parent_id",
-        "child_ids"
-    };
-    private static final SeaTunnelDataType[] DEFAULT_FIELD_TYPES = {
-        BasicType.STRING_TYPE,
-        BasicType.STRING_TYPE,
-        BasicType.INT_TYPE,
-        BasicType.STRING_TYPE,
-        BasicType.INT_TYPE,
-        BasicType.INT_TYPE,
-        BasicType.STRING_TYPE,
-        BasicType.STRING_TYPE
-    };
-    /** Stable metadata fields appended for downstream RAG/document indexing pipelines. */
-    private static final String[] RAG_METADATA_FIELD_NAMES = {
-        "source_uri", "document_id", "chunk_id", "chunk_index", "content_hash"
-    };
-
-    private static final SeaTunnelDataType[] RAG_METADATA_FIELD_TYPES = {
-        BasicType.STRING_TYPE,
-        BasicType.STRING_TYPE,
-        BasicType.STRING_TYPE,
-        BasicType.INT_TYPE,
-        BasicType.STRING_TYPE
-    };
 
     private boolean markdownRagMetadataEnabled =
             FileBaseSourceOptions.MARKDOWN_RAG_METADATA_ENABLED.defaultValue();
 
-    private static class NodeInfo {
-        String elementId;
-        String parentId;
-        List<String> childIds = new ArrayList<>();
-        int positionIndex;
+    private static final class NodeInfo {
+        private final String elementId;
+        private final String parentId;
+        private final List<String> childIds = new ArrayList<>();
+        private final int positionIndex;
 
-        NodeInfo(String elementId, String parentId, int positionIndex) {
+        private NodeInfo(String elementId, String parentId, int positionIndex) {
             this.elementId = elementId;
             this.parentId = parentId;
             this.positionIndex = positionIndex;
@@ -209,27 +176,35 @@ public class MarkdownReadStrategy extends AbstractReadStrategy {
             String sourcePath,
             LogicalDocumentMetadata logicalMetadata,
             Collector<SeaTunnelRow> output) {
-        Parser parser = Parser.builder().build();
-        Node document = parser.parse(markdown);
-        String sourceUri = FileSourceDocumentRouting.normalizeSourceUri(sourcePath);
-
-        Map<Node, NodeInfo> nodeInfoMap = new IdentityHashMap<>();
-        Map<String, Integer> typeCounters = new HashMap<>();
-        List<SeaTunnelRow> rows = new ArrayList<>();
-
-        assignIdsAndCollectTree(document, null, nodeInfoMap, DEFAULT_POSITION, typeCounters);
-        generateRows(
-                document,
-                rows,
-                nodeInfoMap,
-                DEFAULT_PAGE_NUMBER,
-                sourceUri,
-                FileSourceDocumentRouting.buildDocumentId(sourceUri),
-                logicalMetadata);
-
-        for (SeaTunnelRow row : rows) {
+        List<DocumentElement> elements = parseMarkdownElements(markdown);
+        DocumentElementRows rowMapper =
+                new DocumentElementRows(sourcePath, markdownRagMetadataEnabled);
+        for (int i = 0; i < elements.size(); i++) {
+            DocumentElement element = elements.get(i);
+            SeaTunnelRow row = rowMapper.toRow(element, i + 1);
+            if (logicalMetadata != null) {
+                addKnowledgeSyncMetadata(
+                        row,
+                        logicalMetadata.sourceUri,
+                        logicalMetadata.documentId,
+                        logicalMetadata.documentHash,
+                        DocumentElementRows.contentHash(element.getText()));
+            }
             output.collect(row);
         }
+    }
+
+    /** Parses Markdown content into document elements. */
+    List<DocumentElement> parseMarkdownElements(String markdown) {
+        Node document = Parser.builder().build().parse(markdown == null ? "" : markdown);
+        Map<Node, NodeInfo> nodeInfoMap = new IdentityHashMap<>();
+        Map<String, Integer> typeCounters = new HashMap<>();
+        Map<Node, DocumentElement> elementsByNode = new IdentityHashMap<>();
+        List<DocumentElement> elements = new ArrayList<>();
+        assignIdsAndCollectTree(document, null, nodeInfoMap, DEFAULT_POSITION, typeCounters);
+        generateElements(document, elements, nodeInfoMap, elementsByNode);
+        assignHeadingParents(document, elementsByNode);
+        return elements;
     }
 
     private void assignIdsAndCollectTree(
@@ -261,67 +236,81 @@ public class MarkdownReadStrategy extends AbstractReadStrategy {
         }
     }
 
-    private void generateRows(
+    private void generateElements(
             Node node,
-            List<SeaTunnelRow> rows,
+            List<DocumentElement> elements,
             Map<Node, NodeInfo> nodeInfoMap,
-            int pageNumber,
-            String sourceUri,
-            String documentId,
-            LogicalDocumentMetadata logicalMetadata) {
+            Map<Node, DocumentElement> elementsByNode) {
         if (isEligibleForRow(node)) {
             NodeInfo nodeInfo = nodeInfoMap.get(node);
-            String elementType = node.getClass().getSimpleName();
-            Integer headingLevel = null;
-            String text = extractValue(node);
-
+            DocumentElement element = new DocumentElement(elementType(node), extractValue(node));
+            element.setElementId(nodeInfo.elementId);
             if (node instanceof Heading) {
-                headingLevel = ((Heading) node).getLevel();
+                element.setHeadingLevel(((Heading) node).getLevel());
             }
-
-            Object[] fields =
-                    new Object[] {
-                        nodeInfo.elementId,
-                        elementType,
-                        headingLevel,
-                        text,
-                        pageNumber,
-                        nodeInfo.positionIndex,
-                        nodeInfo.parentId,
-                        nodeInfo.childIds.isEmpty() ? null : String.join(",", nodeInfo.childIds)
-                    };
-            String contentHash = null;
-            if (markdownRagMetadataEnabled) {
-                contentHash = FileSourceDocumentRouting.sha256Hex(text == null ? "" : text);
-                fields =
-                        appendRagMetadata(
-                                fields, sourceUri, documentId, rows.size() + 1, contentHash);
-            }
-
-            SeaTunnelRow row = new SeaTunnelRow(fields);
-            if (logicalMetadata != null) {
-                addKnowledgeSyncMetadata(
-                        row,
-                        logicalMetadata.sourceUri,
-                        logicalMetadata.documentId,
-                        logicalMetadata.documentHash,
-                        contentHash);
-            }
-            rows.add(row);
-            log.debug(
-                    "Added row: element_id={} type={} heading_level={} text={} parent_id={} child_ids={}",
-                    nodeInfo.elementId,
-                    elementType,
-                    headingLevel,
-                    text,
-                    nodeInfo.parentId,
-                    nodeInfo.childIds);
+            element.setParentId(nodeInfo.parentId);
+            element.setChildIds(new ArrayList<>(nodeInfo.childIds));
+            element.setPageNumber(DEFAULT_PAGE_NUMBER);
+            element.setPositionIndex(nodeInfo.positionIndex);
+            elements.add(element);
+            elementsByNode.put(node, element);
         }
-
         for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
-            generateRows(
-                    child, rows, nodeInfoMap, pageNumber, sourceUri, documentId, logicalMetadata);
+            generateElements(child, elements, nodeInfoMap, elementsByNode);
         }
+    }
+
+    private void assignHeadingParents(Node document, Map<Node, DocumentElement> elementsByNode) {
+        Deque<DocumentElement> headings = new ArrayDeque<>();
+        for (Node node = document.getFirstChild(); node != null; node = node.getNext()) {
+            DocumentElement element = elementsByNode.get(node);
+            if (element == null) {
+                continue;
+            }
+            if (node instanceof Heading) {
+                while (!headings.isEmpty()
+                        && headings.peek().getHeadingLevel() >= element.getHeadingLevel()) {
+                    headings.pop();
+                }
+            }
+            if (!headings.isEmpty()) {
+                element.setParentId(headings.peek().getElementId());
+                headings.peek().addChildId(element.getElementId());
+            }
+            if (node instanceof Heading) {
+                headings.push(element);
+            }
+        }
+    }
+
+    private DocumentElementType elementType(Node node) {
+        if (node instanceof Heading) {
+            return DocumentElementType.HEADING;
+        }
+        if (node instanceof Paragraph) {
+            return DocumentElementType.PARAGRAPH;
+        }
+        if (node instanceof OrderedList) {
+            return DocumentElementType.ORDERED_LIST;
+        }
+        if (node instanceof BulletList) {
+            return DocumentElementType.BULLET_LIST;
+        }
+        if (node instanceof ListItem) {
+            return node.getParent() instanceof OrderedList
+                    ? DocumentElementType.ORDERED_LIST_ITEM
+                    : DocumentElementType.BULLET_LIST_ITEM;
+        }
+        if (node instanceof BlockQuote) {
+            return DocumentElementType.BLOCK_QUOTE;
+        }
+        if (node instanceof FencedCodeBlock) {
+            return DocumentElementType.FENCED_CODE_BLOCK;
+        }
+        if (node instanceof TableBlock) {
+            return DocumentElementType.TABLE_BLOCK;
+        }
+        throw new IllegalArgumentException("Unsupported Markdown element: " + node.getClass());
     }
 
     private boolean isEligibleForRow(Node node) {
@@ -420,12 +409,7 @@ public class MarkdownReadStrategy extends AbstractReadStrategy {
 
     @Override
     public SeaTunnelRowType getSeaTunnelRowTypeInfo(String path) throws FileConnectorException {
-        if (markdownRagMetadataEnabled) {
-            return new SeaTunnelRowType(
-                    concat(DEFAULT_FIELD_NAMES, RAG_METADATA_FIELD_NAMES),
-                    concat(DEFAULT_FIELD_TYPES, RAG_METADATA_FIELD_TYPES));
-        }
-        return new SeaTunnelRowType(DEFAULT_FIELD_NAMES, DEFAULT_FIELD_TYPES);
+        return DocumentElementRows.rowType(markdownRagMetadataEnabled);
     }
 
     @Override
@@ -436,28 +420,6 @@ public class MarkdownReadStrategy extends AbstractReadStrategy {
                     pluginConfig.getBoolean(
                             FileBaseSourceOptions.MARKDOWN_RAG_METADATA_ENABLED.key());
         }
-    }
-
-    private Object[] appendRagMetadata(
-            Object[] fields,
-            String sourceUri,
-            String documentId,
-            int chunkIndex,
-            String contentHash) {
-        // Keep chunk ids stable across re-reads of the same logical document while still changing
-        // when the chunk content changes.
-        String chunkId =
-                "chunk_"
-                        + FileSourceDocumentRouting.sha256Hex(
-                                documentId + ":" + chunkIndex + ":" + contentHash);
-        Object[] enriched = new Object[fields.length + RAG_METADATA_FIELD_NAMES.length];
-        System.arraycopy(fields, 0, enriched, 0, fields.length);
-        enriched[fields.length] = sourceUri;
-        enriched[fields.length + 1] = documentId;
-        enriched[fields.length + 2] = chunkId;
-        enriched[fields.length + 3] = chunkIndex;
-        enriched[fields.length + 4] = contentHash;
-        return enriched;
     }
 
     /** Adds the four logical Knowledge Sync fields to row options for Metadata projection. */
@@ -472,19 +434,5 @@ public class MarkdownReadStrategy extends AbstractReadStrategy {
         options.put(KnowledgeSyncMetadataField.DOCUMENT_ID.getName(), documentId);
         options.put(KnowledgeSyncMetadataField.DOCUMENT_HASH.getName(), documentHash);
         options.put(KnowledgeSyncMetadataField.CHUNK_HASH.getName(), chunkHash);
-    }
-
-    private static String[] concat(String[] left, String[] right) {
-        String[] result = new String[left.length + right.length];
-        System.arraycopy(left, 0, result, 0, left.length);
-        System.arraycopy(right, 0, result, left.length, right.length);
-        return result;
-    }
-
-    private static SeaTunnelDataType[] concat(SeaTunnelDataType[] left, SeaTunnelDataType[] right) {
-        SeaTunnelDataType[] result = new SeaTunnelDataType[left.length + right.length];
-        System.arraycopy(left, 0, result, 0, left.length);
-        System.arraycopy(right, 0, result, left.length, right.length);
-        return result;
     }
 }
