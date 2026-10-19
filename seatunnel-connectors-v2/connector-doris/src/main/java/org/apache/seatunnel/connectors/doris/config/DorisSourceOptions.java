@@ -54,6 +54,12 @@ public class DorisSourceOptions extends DorisBaseOptions {
                     .withDescription(
                             "Filter expression of the query, which is transparently transmitted to Doris. Doris uses this expression to complete source-side data filtering");
 
+    public static final Option<String> SQL =
+            Options.key("sql")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Custom Doris SELECT query used to read the query result.");
+
     public static final Option<Integer> DORIS_TABLET_SIZE =
             Options.key("doris.request.tablet.size")
                     .intType()

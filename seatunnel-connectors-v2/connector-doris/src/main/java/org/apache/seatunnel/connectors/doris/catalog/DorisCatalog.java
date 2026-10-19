@@ -54,8 +54,10 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -301,6 +303,104 @@ public class DorisCatalog implements Catalog {
             throw new CatalogException(
                     String.format("Failed getting table %s", tablePath.getFullName()), e);
         }
+    }
+
+    /** Returns the schema of a custom source query without reading its result rows. */
+    public CatalogTable getTableBySql(TablePath tablePath, String sql) {
+        String metadataSql = "SELECT * FROM (" + sql + "\n) AS doris_source_query LIMIT 0";
+        TableSchema.Builder builder = TableSchema.builder();
+        try {
+            Map<String, Column> complexSourceColumns = loadComplexSourceColumns(tablePath);
+            String previousCatalog = conn.getCatalog();
+            boolean changeCatalog = !tablePath.getDatabaseName().equals(previousCatalog);
+            try {
+                if (changeCatalog) {
+                    conn.setCatalog(tablePath.getDatabaseName());
+                }
+                try (PreparedStatement statement = conn.prepareStatement(metadataSql);
+                        ResultSet resultSet = statement.executeQuery()) {
+                    ResultSetMetaData metadata = resultSet.getMetaData();
+                    for (int i = 1; i <= metadata.getColumnCount(); i++) {
+                        String columnLabel = metadata.getColumnLabel(i);
+                        Column sourceColumn =
+                                findDirectSourceColumn(
+                                        tablePath, metadata, i, columnLabel, complexSourceColumns);
+                        if (sourceColumn != null) {
+                            builder.column(sourceColumn);
+                            continue;
+                        }
+                        int jdbcType = metadata.getColumnType(i);
+                        String typeName = metadata.getColumnTypeName(i);
+                        if (jdbcType == Types.DECIMAL || jdbcType == Types.NUMERIC) {
+                            typeName = "DECIMALV3";
+                        }
+                        BasicTypeDefine type =
+                                BasicTypeDefine.builder()
+                                        .name(metadata.getColumnLabel(i))
+                                        .columnType(typeName)
+                                        .dataType(typeName)
+                                        .sqlType(jdbcType)
+                                        .length((long) metadata.getPrecision(i))
+                                        .precision((long) metadata.getPrecision(i))
+                                        .scale(metadata.getScale(i))
+                                        .nullable(
+                                                metadata.isNullable(i)
+                                                        != ResultSetMetaData.columnNoNulls)
+                                        .build();
+                        builder.column(typeConverter.convert(type));
+                    }
+                }
+            } finally {
+                if (changeCatalog) {
+                    conn.setCatalog(previousCatalog);
+                }
+            }
+            return CatalogTable.of(
+                    TableIdentifier.of(
+                            catalogName, tablePath.getDatabaseName(), tablePath.getTableName()),
+                    builder.build(),
+                    connectorOptions(),
+                    Collections.emptyList(),
+                    "",
+                    catalogName);
+        } catch (Exception e) {
+            throw new CatalogException(
+                    String.format("Failed getting query schema for %s", tablePath.getFullName()),
+                    e);
+        }
+    }
+
+    private Map<String, Column> loadComplexSourceColumns(TablePath tablePath) throws SQLException {
+        Map<String, Column> columns = new HashMap<>();
+        try (PreparedStatement statement =
+                conn.prepareStatement(DorisCatalogUtil.TABLE_SCHEMA_QUERY)) {
+            statement.setString(1, tablePath.getDatabaseName());
+            statement.setString(2, tablePath.getTableName());
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    String dataType = resultSet.getString("DATA_TYPE");
+                    if ("ARRAY".equalsIgnoreCase(dataType) || "MAP".equalsIgnoreCase(dataType)) {
+                        Column column = buildColumn(resultSet);
+                        columns.put(column.getName(), column);
+                    }
+                }
+            }
+        }
+        return columns;
+    }
+
+    private Column findDirectSourceColumn(
+            TablePath tablePath,
+            ResultSetMetaData metadata,
+            int columnIndex,
+            String columnLabel,
+            Map<String, Column> complexSourceColumns)
+            throws SQLException {
+        if (!tablePath.getTableName().equalsIgnoreCase(metadata.getTableName(columnIndex))
+                || !columnLabel.equalsIgnoreCase(metadata.getColumnName(columnIndex))) {
+            return null;
+        }
+        return complexSourceColumns.get(columnLabel);
     }
 
     private void buildTableSchemaWithErrorCheck(

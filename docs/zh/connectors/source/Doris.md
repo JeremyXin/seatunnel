@@ -88,6 +88,7 @@ import ChangeLog from '../changelog/connector-doris.md';
 |----------------------------------|--------|----------|------------|-----------------------------------------------------------------------------------------------------|
 | database                         | string | yes      | -          | 数据库                                                                                               |
 | table                            | string | yes      | -          | 表名                                                                                                |
+| sql                              | string | no       | -          | 通过 JDBC 执行的完整 SQL 查询；不能与 `doris.filter.query` 或 `doris.read.field` 同时配置。 |
 | doris.read.field                 | string | no       | -          | 选择要读取的Doris表字段                                                                                |
 | doris.filter.query               | string | no       | -          | 数据过滤. 格式："字段 = 值", 例如：doris.filter.query = "F_ID > 2"                                       |
 | doris.request.tablet.size        | int    | no       | Integer.MAX_VALUE | 当前表每个 SeaTunnel split 包含的 Doris tablet 数量，最小值为 `1`。                              |
@@ -101,6 +102,28 @@ import ChangeLog from '../changelog/connector-doris.md';
 > 不建议随意修改高级参数
 
 ## 例子
+
+### SQL 查询
+
+单表可在 source 外层配置 `sql`，多表可在各 `table_list` 条目中配置。`database` 和 `table` 仍为必填项，用于标识输出表。输出结构取自查询结果，包含别名和聚合列。
+
+完整查询通过 Doris 查询端口使用 JDBC 执行，仅生成一个 split。`GROUP BY`、关联和子查询基于完整查询结果执行；tablet 切分和 `doris.request.tablet.size` 不会拆分 SQL 查询。提高并行度不会并行执行单条 SQL。请按上文说明提供 Doris JDBC 驱动。
+
+同一表配置中的 `sql` 不能与 `doris.filter.query` 或 `doris.read.field` 同时使用。不配置 `sql` 时，现有选项保持原有表扫描行为，`doris.filter.query` 仍用于配置过滤表达式。
+
+```hocon
+source {
+  Doris {
+    fenodes = "doris:8030"
+    query-port = 9030
+    username = "root"
+    password = ""
+    database = "demo"
+    table = "orders"
+    sql = "SELECT customer_id, COUNT(*) AS order_count FROM demo.orders GROUP BY customer_id"
+  }
+}
+```
 
 ### 单表
 > 这是一个从doris读取数据后，输出到控制台的例子：

@@ -18,15 +18,14 @@
 package org.apache.seatunnel.connectors.doris.source.split;
 
 import org.apache.seatunnel.api.source.SourceSplit;
+import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.connectors.doris.rest.PartitionDefinition;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.util.Objects;
 
-@AllArgsConstructor
 @Getter
 @Setter
 public class DorisSourceSplit implements SourceSplit {
@@ -34,7 +33,25 @@ public class DorisSourceSplit implements SourceSplit {
     private static final long serialVersionUID = 8626697814676246066L;
     private final PartitionDefinition partitionDefinition;
 
+    private final TablePath tablePath;
+
+    private final String sql;
+
     private final String splitId;
+
+    public DorisSourceSplit(PartitionDefinition partitionDefinition, String splitId) {
+        this.partitionDefinition = partitionDefinition;
+        this.tablePath = null;
+        this.sql = null;
+        this.splitId = splitId;
+    }
+
+    public DorisSourceSplit(TablePath tablePath, String sql) {
+        this.partitionDefinition = null;
+        this.tablePath = tablePath;
+        this.sql = sql;
+        this.splitId = tablePath.getFullName() + "-sql";
+    }
 
     @Override
     public String splitId() {
@@ -47,6 +64,9 @@ public class DorisSourceSplit implements SourceSplit {
 
     @Override
     public String toString() {
+        if (sql != null) {
+            return String.format("DorisSourceSplit: %s,sql", tablePath);
+        }
         return String.format(
                 "DorisSourceSplit: %s.%s,be=%s,tablets=%s",
                 partitionDefinition.getDatabase(),
@@ -65,6 +85,8 @@ public class DorisSourceSplit implements SourceSplit {
         }
         DorisSourceSplit that = (DorisSourceSplit) o;
 
-        return Objects.equals(partitionDefinition, that.partitionDefinition);
+        return Objects.equals(partitionDefinition, that.partitionDefinition)
+                && Objects.equals(tablePath, that.tablePath)
+                && Objects.equals(sql, that.sql);
     }
 }

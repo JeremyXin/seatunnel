@@ -70,6 +70,43 @@ public class DorisSourceSplitEnumeratorTest {
     private static final int PARTITION_NUMS = 10;
 
     @Test
+    public void customSqlCreatesOneSplitWithoutQueryPlan() {
+        DorisSourceConfig sourceConfig = Mockito.mock(DorisSourceConfig.class);
+        DorisSourceTable sourceTable = Mockito.mock(DorisSourceTable.class);
+        Mockito.when(sourceTable.getSql())
+                .thenReturn("SELECT F_ID FROM source_table GROUP BY F_ID");
+        Mockito.when(sourceTable.getTablePath()).thenReturn(TablePath.of(DATABASE, TABLE));
+        SourceSplitEnumerator.Context<DorisSourceSplit> context =
+                Mockito.mock(SourceSplitEnumerator.Context.class);
+        Mockito.when(context.currentParallelism()).thenReturn(PARALLELISM);
+        Mockito.when(context.registeredReaders())
+                .thenReturn(
+                        new HashSet<>(
+                                IntStream.range(0, PARALLELISM)
+                                        .boxed()
+                                        .collect(Collectors.toList())));
+
+        DorisSourceSplitEnumerator enumerator =
+                new DorisSourceSplitEnumerator(
+                        context,
+                        sourceConfig,
+                        java.util.Collections.singletonMap(
+                                TablePath.of(DATABASE, TABLE), sourceTable));
+        try (MockedStatic<RestService> rest = Mockito.mockStatic(RestService.class)) {
+            enumerator.run();
+            rest.verifyNoInteractions();
+        }
+
+        ArgumentCaptor<List> assigned = ArgumentCaptor.forClass(List.class);
+        Mockito.verify(context).assignSplit(Mockito.anyInt(), assigned.capture());
+        Assertions.assertEquals(1, assigned.getValue().size());
+        Assertions.assertEquals(0, enumerator.currentUnassignedSplitSize());
+        DorisSourceSplit split = (DorisSourceSplit) assigned.getValue().get(0);
+        Assertions.assertEquals("SELECT F_ID FROM source_table GROUP BY F_ID", split.getSql());
+        Assertions.assertEquals(TablePath.of(DATABASE, TABLE), split.getTablePath());
+    }
+
+    @Test
     public void dorisSourceSplitEnumeratorTest() {
         DorisSourceConfig dorisSourceConfig = Mockito.mock(DorisSourceConfig.class);
         DorisSourceTable dorisSourceTable = Mockito.mock(DorisSourceTable.class);

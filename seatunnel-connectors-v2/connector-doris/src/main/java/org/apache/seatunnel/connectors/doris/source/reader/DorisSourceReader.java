@@ -48,6 +48,8 @@ public class DorisSourceReader implements SourceReader<SeaTunnelRow, DorisSource
     private volatile boolean noMoreSplits;
 
     private DorisValueReader valueReader;
+    private volatile DorisSqlReader sqlReader;
+    private volatile boolean cancelled;
 
     private final Map<TablePath, DorisSourceTable> tables;
 
@@ -66,7 +68,17 @@ public class DorisSourceReader implements SourceReader<SeaTunnelRow, DorisSource
 
     @Override
     public void close() throws IOException {
+        cancel();
         closeValueReader();
+    }
+
+    @Override
+    public void cancel() {
+        cancelled = true;
+        DorisSqlReader currentReader = sqlReader;
+        if (currentReader != null) {
+            currentReader.cancel();
+        }
     }
 
     /**
@@ -83,24 +95,49 @@ public class DorisSourceReader implements SourceReader<SeaTunnelRow, DorisSource
 
     @Override
     public void pollNext(Collector<SeaTunnelRow> output) throws Exception {
+        if (cancelled) {
+            return;
+        }
         synchronized (output.getCheckpointLock()) {
             DorisSourceSplit nextSplit = splitsQueue.poll();
             if (nextSplit != null) {
-                PartitionDefinition partition = nextSplit.getPartitionDefinition();
-                DorisSourceTable dorisSourceTable =
-                        tables.get(TablePath.of(partition.getDatabase(), partition.getTable()));
-                if (dorisSourceTable == null) {
-                    throw new DorisConnectorException(
-                            DorisConnectorErrorCode.SHOULD_NEVER_HAPPEN,
-                            String.format(
-                                    "the table '%s.%s' cannot be found in table_list of job configuration.",
-                                    partition.getDatabase(), partition.getTable()));
-                }
-                closeValueReader();
-                valueReader = new DorisValueReader(partition, dorisSourceConfig, dorisSourceTable);
-                while (valueReader.hasNext()) {
-                    SeaTunnelRow record = valueReader.next();
-                    output.collect(record);
+                if (nextSplit.getSql() != null) {
+                    DorisSourceTable sqlTable = tables.get(nextSplit.getTablePath());
+                    if (sqlTable == null) {
+                        throw new DorisConnectorException(
+                                DorisConnectorErrorCode.SHOULD_NEVER_HAPPEN,
+                                "Missing Doris SQL source table " + nextSplit.getTablePath());
+                    }
+                    closeValueReader();
+                    DorisSqlReader currentReader = new DorisSqlReader(dorisSourceConfig, sqlTable);
+                    sqlReader = currentReader;
+                    try {
+                        if (cancelled) {
+                            currentReader.cancel();
+                        }
+                        currentReader.read(output);
+                    } finally {
+                        currentReader.close();
+                        sqlReader = null;
+                    }
+                } else {
+                    PartitionDefinition partition = nextSplit.getPartitionDefinition();
+                    DorisSourceTable dorisSourceTable =
+                            tables.get(TablePath.of(partition.getDatabase(), partition.getTable()));
+                    if (dorisSourceTable == null) {
+                        throw new DorisConnectorException(
+                                DorisConnectorErrorCode.SHOULD_NEVER_HAPPEN,
+                                String.format(
+                                        "the table '%s.%s' cannot be found in table_list of job configuration.",
+                                        partition.getDatabase(), partition.getTable()));
+                    }
+                    closeValueReader();
+                    valueReader =
+                            new DorisValueReader(partition, dorisSourceConfig, dorisSourceTable);
+                    while (valueReader.hasNext()) {
+                        SeaTunnelRow record = valueReader.next();
+                        output.collect(record);
+                    }
                 }
             }
             if (Boundedness.BOUNDED.equals(context.getBoundedness())

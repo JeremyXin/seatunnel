@@ -63,6 +63,7 @@ public class DorisSourceFactory implements TableSourceFactory {
                 .optional(DorisSourceOptions.DATABASE)
                 .optional(DorisSourceOptions.TABLE)
                 .optional(DorisSourceOptions.DORIS_FILTER_QUERY)
+                .optional(DorisSourceOptions.SQL)
                 .optional(DorisSourceOptions.DORIS_TABLET_SIZE)
                 .optional(DorisSourceOptions.DORIS_REQUEST_CONNECT_TIMEOUT_MS)
                 .optional(DorisSourceOptions.DORIS_REQUEST_READ_TIMEOUT_MS)
@@ -107,7 +108,10 @@ public class DorisSourceFactory implements TableSourceFactory {
                                         .collect(Collectors.toList());
                     }
 
-                    table = catalog.getTable(tablePath, readFiledList);
+                    table =
+                            StringUtils.isNotBlank(dorisTableConfig.getSql())
+                                    ? catalog.getTableBySql(tablePath, dorisTableConfig.getSql())
+                                    : catalog.getTable(tablePath, readFiledList);
                 } catch (Exception e) {
                     log.error("create source error");
                     throw e;
@@ -119,6 +123,7 @@ public class DorisSourceFactory implements TableSourceFactory {
                                 .tablePath(tablePath)
                                 .readField(readFields)
                                 .filterQuery(dorisTableConfig.getFilterQuery())
+                                .sql(dorisTableConfig.getSql())
                                 .batchSize(dorisTableConfig.getBatchSize())
                                 .tabletSize(dorisTableConfig.getTabletSize())
                                 .execMemLimit(dorisTableConfig.getExecMemLimit())

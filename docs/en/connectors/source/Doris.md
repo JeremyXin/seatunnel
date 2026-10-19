@@ -88,6 +88,7 @@ Table list configuration:
 |----------------------------------|--------|----------|------------|-----------------------------------------------------------------------------------------------------|
 | database                         | string | yes      | -          | The name of Doris database                                                                          |
 | table                            | string | yes      | -          | The name of Doris table                                                                             |
+| sql                              | string | no       | -          | Complete SQL query executed through JDBC; cannot be combined with `doris.filter.query` or `doris.read.field`. |
 | doris.read.field                 | string | no       | -          | Use the 'doris.read.field' parameter to select the doris table columns to read                      |
 | doris.filter.query               | string | no       | -          | Data filtering in doris. the format is "field = value",example : doris.filter.query = "F_ID > 2"    |
 | doris.request.tablet.size        | int    | no       | Integer.MAX_VALUE | The number of Doris tablets grouped into each SeaTunnel split for this table. The minimum value is `1`. |
@@ -101,6 +102,28 @@ Note: When this configuration corresponds to a single table, you can flatten the
 > It is not recommended to modify advanced parameters at will
 
 ## Example
+
+### SQL query
+
+Configure `sql` at the source level for a single table, or in each `table_list` entry. `database` and `table` remain required and identify the output table. The query result determines the output schema, including aliases and aggregate columns.
+
+The complete query executes through the Doris query port using JDBC as one split. `GROUP BY`, joins, and subqueries operate on the complete query result; tablet splitting and `doris.request.tablet.size` do not partition SQL queries. Increasing parallelism does not parallelize a single SQL query. Ensure the Doris JDBC driver is available as described above.
+
+`sql` cannot be combined with `doris.filter.query` or `doris.read.field` in the same table configuration. Without `sql`, these existing options retain their table scan behavior; `doris.filter.query` remains a filter expression.
+
+```hocon
+source {
+  Doris {
+    fenodes = "doris:8030"
+    query-port = 9030
+    username = "root"
+    password = ""
+    database = "demo"
+    table = "orders"
+    sql = "SELECT customer_id, COUNT(*) AS order_count FROM demo.orders GROUP BY customer_id"
+  }
+}
+```
 
 ### single table
 > This is an example of reading a Doris table and writing to Console.

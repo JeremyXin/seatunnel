@@ -33,6 +33,7 @@ public class DorisSourceTable implements Serializable {
     private final TablePath tablePath;
     private String readField;
     private String filterQuery;
+    private String sql;
     private int batchSize;
     private Integer tabletSize;
     private Long execMemLimit;

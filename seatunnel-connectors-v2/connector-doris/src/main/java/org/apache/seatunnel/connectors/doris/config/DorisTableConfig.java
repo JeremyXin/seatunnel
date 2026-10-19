@@ -42,6 +42,7 @@ import static org.apache.seatunnel.connectors.doris.config.DorisSourceOptions.DO
 import static org.apache.seatunnel.connectors.doris.config.DorisSourceOptions.DORIS_FILTER_QUERY;
 import static org.apache.seatunnel.connectors.doris.config.DorisSourceOptions.DORIS_READ_FIELD;
 import static org.apache.seatunnel.connectors.doris.config.DorisSourceOptions.DORIS_TABLET_SIZE;
+import static org.apache.seatunnel.connectors.doris.config.DorisSourceOptions.SQL;
 import static org.apache.seatunnel.connectors.doris.config.DorisSourceOptions.TABLE_LIST;
 
 @Data
@@ -60,6 +61,9 @@ public class DorisTableConfig implements Serializable {
 
     @JsonProperty("doris.filter.query")
     private String filterQuery;
+
+    @JsonProperty("sql")
+    private String sql;
 
     @JsonProperty("doris.batch.size")
     private int batchSize;
@@ -98,6 +102,7 @@ public class DorisTableConfig implements Serializable {
                             .database(connectorConfig.get(DATABASE))
                             .readField(connectorConfig.get(DORIS_READ_FIELD))
                             .filterQuery(connectorConfig.get(DORIS_FILTER_QUERY))
+                            .sql(connectorConfig.get(SQL))
                             .batchSize(connectorConfig.get(DORIS_BATCH_SIZE))
                             .tabletSize(connectorConfig.get(DORIS_TABLET_SIZE))
                             .execMemLimit(connectorConfig.get(DORIS_EXEC_MEM_LIMIT))
@@ -119,6 +124,17 @@ public class DorisTableConfig implements Serializable {
         }
 
         for (DorisTableConfig dorisTableConfig : tableList) {
+            if (dorisTableConfig.getSql() != null) {
+                String sql = dorisTableConfig.getSql().trim();
+                if (sql.endsWith(";")) {
+                    sql = sql.substring(0, sql.length() - 1).trim();
+                }
+                if (sql.isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "`sql` must contain a query, not only whitespace or a semicolon.");
+                }
+                dorisTableConfig.setSql(sql);
+            }
             if (StringUtils.isBlank(dorisTableConfig.getDatabase())) {
                 throw new IllegalArgumentException(
                         "Please configure `database`, not allow null database in config.");
@@ -126,6 +142,16 @@ public class DorisTableConfig implements Serializable {
             if (StringUtils.isBlank(dorisTableConfig.getTable())) {
                 throw new IllegalArgumentException(
                         "Please configure `table`, not allow null table in config.");
+            }
+            if (StringUtils.isNotBlank(dorisTableConfig.getSql())) {
+                if (StringUtils.isNotBlank(dorisTableConfig.getFilterQuery())) {
+                    throw new IllegalArgumentException(
+                            "`sql` and `doris.filter.query` cannot be configured together.");
+                }
+                if (StringUtils.isNotBlank(dorisTableConfig.getReadField())) {
+                    throw new IllegalArgumentException(
+                            "`sql` and `doris.read.field` cannot be configured together.");
+                }
             }
             if (dorisTableConfig.getBatchSize() <= 0) {
                 dorisTableConfig.setBatchSize(DORIS_BATCH_SIZE.defaultValue());

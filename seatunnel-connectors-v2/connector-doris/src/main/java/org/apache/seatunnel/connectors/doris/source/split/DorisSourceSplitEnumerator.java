@@ -17,6 +17,8 @@
 
 package org.apache.seatunnel.connectors.doris.source.split;
 
+import org.apache.seatunnel.shade.org.apache.commons.lang3.StringUtils;
+
 import org.apache.seatunnel.api.source.SourceSplitEnumerator;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated;
@@ -152,6 +154,12 @@ public class DorisSourceSplitEnumerator
     private List<DorisSourceSplit> getDorisSourceSplit() {
         List<DorisSourceSplit> splits = new ArrayList<>();
         for (DorisSourceTable dorisSourceTable : dorisSourceTables.values()) {
+            if (StringUtils.isNotBlank(dorisSourceTable.getSql())) {
+                splits.add(
+                        new DorisSourceSplit(
+                                dorisSourceTable.getTablePath(), dorisSourceTable.getSql()));
+                continue;
+            }
             List<PartitionDefinition> partitions =
                     RestService.findPartitions(dorisSourceConfig, dorisSourceTable, log);
             for (PartitionDefinition partition : partitions) {

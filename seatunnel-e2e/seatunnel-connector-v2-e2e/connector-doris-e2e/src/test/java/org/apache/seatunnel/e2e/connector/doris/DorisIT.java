@@ -234,6 +234,32 @@ public class DorisIT extends AbstractDorisIT {
     }
 
     @TestTemplate
+    public void testDorisSql(TestContainer container)
+            throws IOException, InterruptedException, SQLException {
+        initializeJdbcTable();
+        try (Statement statement = conn.createStatement()) {
+            statement.execute(createUniqueTableForTest(sinkDB));
+            statement.execute(createDuplicateTableForTest(sinkDB));
+        }
+        clearUniqueTable();
+        clearDuplicateTable();
+        try {
+            batchInsertUniqueTableData();
+            Container.ExecResult grouped = container.executeJob("/doris_source_sql_group_by.conf");
+            Assertions.assertEquals(0, grouped.getExitCode(), grouped.getStderr());
+            checkSinkData();
+
+            batchInsertDuplicateTableData();
+            Container.ExecResult subquery = container.executeJob("/doris_source_sql_subquery.conf");
+            Assertions.assertEquals(0, subquery.getExitCode(), subquery.getStderr());
+            checkAllTypeSinkData();
+        } finally {
+            clearUniqueTable();
+            clearDuplicateTable();
+        }
+    }
+
+    @TestTemplate
     public void testNoSchemaDoris(TestContainer container)
             throws IOException, InterruptedException {
         initializeJdbcTable();
